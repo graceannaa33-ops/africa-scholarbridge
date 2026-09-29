@@ -114,29 +114,47 @@ def make_mrz(surname, given, passport, nationality, dob_yymmdd, sex, expiry_yymm
     return line1, line2
 
 
-def make_pdf(lines):
-    """A small but real one-page PDF whose text layer holds `lines`."""
+def make_pdf(lines, jpeg=None, size=None):
+    """A small but real one-page PDF whose text layer holds `lines`.
+    With `jpeg` (bytes) and `size` (w, h) the page also shows that image -
+    like a phone-scanner PDF: page image + its own (possibly imperfect)
+    OCR text layer."""
     def esc(t):
         return t.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-    content = "BT /F1 10 Tf 40 780 Td 14 TL\n" + "".join(f"({esc(l)}) Tj T*\n" for l in lines) + "ET"
+    content = ""
+    if jpeg:
+        content += "q 612 0 0 400 0 300 cm /Im1 Do Q\n"
+    content += "BT /F1 10 Tf 40 780 Td 14 TL\n" + "".join(f"({esc(l)}) Tj T*\n" for l in lines) + "ET"
+    xobj = " /XObject << /Im1 6 0 R >>" if jpeg else ""
     objs = [
-        "<< /Type /Catalog /Pages 2 0 R >>",
-        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        "/Resources << /Font << /F1 5 0 R >> >> >>",
-        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream",
-        "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        ("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+         f"/Resources << /Font << /F1 5 0 R >>{xobj} >> >>").encode(),
+        f"<< /Length {len(content)} >>\nstream\n{content}\nendstream".encode("latin-1"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
     ]
+    if jpeg:
+        w, h = size
+        objs.append(f"<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceRGB "
+                    f"/BitsPerComponent 8 /Filter /DCTDecode /Length {len(jpeg)} >>\nstream\n".encode()
+                    + jpeg + b"\nendstream")
     out = b"%PDF-1.4\n"
     offsets = []
     for i, o in enumerate(objs, 1):
         offsets.append(len(out))
-        out += f"{i} 0 obj\n{o}\nendobj\n".encode("latin-1")
+        out += f"{i} 0 obj\n".encode() + o + b"\nendobj\n"
     xref = len(out)
     out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n".encode()
     out += "".join(f"{off:010d} 00000 n \n" for off in offsets).encode()
     out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     return out
+
+
+def scanner_pdf(text_lines, blur=0, **overrides):
+    """Phone-scanner style PDF: the visa page image + a separate text layer."""
+    im = visa_image(blur, **overrides)
+    return make_pdf(text_lines, jpeg=image_bytes(im, "JPEG"), size=im.size)
 
 
 def fmt_foil(d):
@@ -201,7 +219,7 @@ def valid_case(fmt="pdf", blur=0, **overrides):
     p, printed, (l1, l2) = _visa_fields(overrides)
     if fmt == "pdf":
         data = make_pdf(printed + [l1, l2])
-    elif fmt == "jpg":
+    elif fmt in ("jpg", "jpeg"):
         data = image_bytes(visa_image(blur, **overrides), "JPEG")
     elif fmt == "png":
         data = image_bytes(visa_image(blur, **overrides), "PNG")
@@ -217,7 +235,8 @@ def valid_case(fmt="pdf", blur=0, **overrides):
     return form, data
 
 
-FILENAMES = {"pdf": "visa.pdf", "jpg": "visa.jpg", "png": "visa.png", "scanpdf": "visa-scan.pdf"}
+FILENAMES = {"pdf": "visa.pdf", "jpg": "visa.jpg", "jpeg": "visa.JPEG", "png": "visa.png",
+             "scanpdf": "visa-scan.pdf"}
 
 
 PNG_BYTES = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (800).to_bytes(4, "big")

@@ -34,7 +34,7 @@ def _assert_failed_to_assistance(client, student, r):
 # ---------------------------------------------------------------------
 # Valid submission: the ONLY way to see the success message
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize("fmt", ["pdf", "jpg", "png", "scanpdf"])
+@pytest.mark.parametrize("fmt", ["pdf", "jpg", "jpeg", "png", "scanpdf"])
 def test_valid_visa_is_verified_and_student_can_continue(client, student, fmt):
     """1-3: valid readable PDF (text), JPG, PNG - plus an image-only scanned PDF."""
     choose_yes(client)
@@ -309,17 +309,21 @@ def test_after_failure_existing_mpesa_verification_lets_student_continue(client,
 # ---------------------------------------------------------------------
 # Fail closed when the image reader itself can't run
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize("problem", ["reader missing", "reader times out", "server busy"])
+@pytest.mark.parametrize("problem", ["reader missing", "reader times out", "reader over memory limit",
+                                     "server busy", "reader crashes"])
 def test_valid_photo_still_fails_if_it_cannot_be_read(client, student, monkeypatch, problem):
-    import subprocess
+    """A GENUINE, readable visa photo must still FAIL (never pass) when the
+    reader can't do its job - fail closed."""
     if problem == "reader missing":
         monkeypatch.setattr(vv, "_OCR_WORKER", "/nonexistent/visa_ocr_worker.py")
     elif problem == "reader times out":
-        def boom(*a, **k):
-            raise subprocess.TimeoutExpired(cmd="ocr", timeout=1)
-        monkeypatch.setattr(vv.subprocess, "run", boom)
-    else:
+        monkeypatch.setattr(vv, "OCR_TIMEOUT_SECONDS", 0.2)
+    elif problem == "reader over memory limit":
+        monkeypatch.setattr(vv, "OCR_MAX_RSS_MB", 20)
+    elif problem == "server busy":
         monkeypatch.setattr(vv._OcrLock, "__enter__", lambda self: False)
+    else:
+        monkeypatch.setattr(vv.sys, "executable", "/bin/false")
     choose_yes(client)
     form, data = valid_case("jpg")
     r = upload(client, form, data, "visa.jpg")
@@ -340,3 +344,82 @@ def test_short_names_on_photos_are_read(surname, given, fmt):
         form, data, FILENAMES[fmt], {"full_name": f"{given} {surname}", "date_of_birth": "2003-05-14"})
     assert ok, errors
     assert cleaned["read_from"] == "ocr"
+
+
+# ---------------------------------------------------------------------
+# Real-world document variations (each must still pass EVERY check)
+# ---------------------------------------------------------------------
+def _applicant():
+    from conftest import APPLICANT
+    return {"full_name": APPLICANT["full_name"], "date_of_birth": APPLICANT["date_of_birth"]}
+
+
+def _variants():
+    import io as _io
+    from PIL import Image
+    from conftest import _visa_fields, scanner_pdf, visa_image
+    im = visa_image()
+    _, printed, (l1, l2) = _visa_fields({})
+    bad_l2 = l2[:9] + str((int(l2[9]) + 1) % 10) + l2[10:]
+
+    def exif_sideways():
+        ex = Image.Exif()
+        ex[0x0112] = 6
+        b = _io.BytesIO()
+        im.rotate(90, expand=True).save(b, "JPEG", quality=80, exif=ex.tobytes())
+        return b.getvalue()
+    return {
+        "JPEG extension (.JPEG)": (valid_case("jpeg")[1], "VISA.JPEG"),
+        "scanner PDF with correct text layer": (scanner_pdf(printed + [l1, l2]), "scan.pdf"),
+        "scanner PDF whose text layer misread a digit": (scanner_pdf(printed + [l1, bad_l2]), "scan.pdf"),
+        "upside-down photo": (image_bytes(im.rotate(180), "JPEG"), "v.jpg"),
+        "sideways photo, no orientation data": (image_bytes(im.rotate(90, expand=True), "JPEG"), "v.jpg"),
+        "sideways photo with EXIF orientation": (exif_sideways(), "v.jpg"),
+        "grayscale PNG": (image_bytes(im.convert("L"), "PNG"), "v.png"),
+        "PNG with transparency": (image_bytes(im.convert("RGBA"), "PNG"), "v.png"),
+        "CMYK JPEG": (image_bytes(im.convert("CMYK"), "JPEG"), "v.jpg"),
+        "large phone photo (4032x2592)": (image_bytes(im.resize((4032, 2592)), "JPEG"), "v.jpg"),
+    }
+
+
+@pytest.mark.parametrize("name", sorted(_variants()))
+def test_real_world_variants_pass_all_checks(name):
+    data, filename = _variants()[name]
+    ok, _, errors = vv.verify_visa_submission(valid_case()[0], data, filename, _applicant())
+    assert ok, errors
+
+
+def test_scanner_pdf_with_bad_text_and_blurry_image_fails():
+    from conftest import _visa_fields, scanner_pdf
+    _, printed, (l1, l2) = _visa_fields({})
+    bad_l2 = l2[:9] + str((int(l2[9]) + 1) % 10) + l2[10:]
+    ok, _, _ = vv.verify_visa_submission(valid_case()[0], scanner_pdf(printed + [l1, bad_l2], blur=4),
+                                         "scan.pdf", _applicant())
+    assert not ok
+
+
+def test_image_with_too_many_pixels_is_refused_not_decoded():
+    from PIL import Image
+    big = image_bytes(Image.new("RGB", (7000, 7000), (255, 255, 255)), "PNG")   # 49 MP, small file
+    ok, _, errors = vv.verify_visa_submission(valid_case()[0], big, "v.png", _applicant())
+    assert not ok and any("too many pixels" in e for e in errors)
+
+
+@pytest.mark.parametrize("size_mb", [9, 30])
+def test_oversized_visa_file_goes_to_assistance_not_a_cut_connection(client, student, size_mb):
+    choose_yes(client)
+    r = upload(client, valid_case()[0], b"%PDF-1.4\n" + b"0" * (size_mb * 1024 * 1024), "big.pdf")
+    _assert_failed_to_assistance(client, student, r)
+
+
+def test_other_routes_keep_the_8mb_request_limit(client, student):
+    """Only the visa upload route accepts a larger request body; everything
+    else (e.g. M-PESA payment screenshots) is unchanged."""
+    import io as _io
+    import app as app_module
+    with app_module.app.test_request_context("/student-visa/payment/1/submit", method="POST"):
+        from flask import request
+        assert request.max_content_length == 8 * 1024 * 1024
+    with app_module.app.test_request_context("/application/visa-document/upload", method="POST"):
+        from flask import request
+        assert request.max_content_length == 32 * 1024 * 1024

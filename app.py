@@ -100,6 +100,24 @@ ALLOWED_VISA_DOC_EXTENSIONS = visa_verify.ALLOWED_EXTENSIONS
 MAX_VISA_DOC_SIZE_BYTES = visa_verify.MAX_FILE_BYTES  # 8 MB - a reasonable limit for a scanned document/photo
 app.config["MAX_CONTENT_LENGTH"] = MAX_VISA_DOC_SIZE_BYTES
 
+# The visa upload route alone accepts a larger REQUEST (files above 500 KB are
+# spooled to a temp file, not held in memory) so that an over-8 MB visa file
+# is read and then rejected by the normal verification failure path (-> visa
+# assistance) instead of the connection being cut mid-upload. Every other
+# route - including M-PESA screenshot uploads - keeps MAX_CONTENT_LENGTH.
+VISA_UPLOAD_REQUEST_LIMIT = 32 * 1024 * 1024
+
+
+class _AppRequest(app.request_class):
+    @property
+    def max_content_length(self):
+        if self.path == "/application/visa-document/upload":
+            return VISA_UPLOAD_REQUEST_LIMIT
+        return super().max_content_length
+
+
+app.request_class = _AppRequest
+
 # File-type, size, signature and content checks live in visa_verification.py.
 
 

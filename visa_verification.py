@@ -54,7 +54,6 @@ Document  : a U.S. visa MRZ (document code V, issuer USA) is read from
             visa class and issue date printed on the visa == entered.
 """
 
-import io
 import json
 import os
 import re
@@ -67,14 +66,15 @@ from datetime import date, datetime
 ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
 MIN_FILE_BYTES = 512
 MAX_FILE_BYTES = 8 * 1024 * 1024
-MAX_PDF_PAGES = 10
-MAX_PDF_IMAGES_TO_READ = 3
-MIN_IMAGE_SIDE = 300           # pixels; smaller than this can't hold a legible visa
 MAX_VISA_VALIDITY_YEARS = 10   # longest validity the U.S. issues on any visa
 
-# OCR runs in a subprocess; keep the whole request under gunicorn's 30 s timeout.
-OCR_TIMEOUT_SECONDS = 18
-OCR_LOCK_WAIT_SECONDS = 8
+# Reading runs in ONE subprocess per verification (visa_ocr_worker.py).
+# Measured on a single core: ~3.5 s per photo (~7 s on Render's 0.5 CPU),
+# peak ~280-330 MB resident. Limits (any breach = unreadable = FAIL):
+OCR_LOCK_WAIT_SECONDS = 90     # queue behind other verifications (one reader at a time)
+OCR_TIMEOUT_SECONDS = 45       # hard kill of the reading process
+OCR_WORK_BUDGET_SECONDS = 25   # after this the reader stops optional extra passes
+OCR_MAX_RSS_MB = 400           # watchdog: killed if it ever uses more than this
 _OCR_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visa_ocr_worker.py")
 
 # U.S. student / exchange-visitor visa classes accepted for this step.
@@ -252,117 +252,96 @@ class _OcrLock:
             self.fh.close()  # releases the lock
 
 
-def ocr_image_lines(image_bytes):
-    """Returns the text lines read from an image, or None when the image
-    could not be read for ANY reason (library missing, corrupt image,
-    timeout, out of memory, server busy). None always means FAIL."""
+# glibc allocator: one arena for the (single-threaded) reader, which keeps
+# its peak lower; visa_ocr_worker.py also returns freed memory to the OS
+# between passes (malloc_trim). Measured: ~240-300 MB peak, no slowdown.
+_OCR_ENV = dict(os.environ, MALLOC_ARENA_MAX="1", OMP_NUM_THREADS="1")
+
+
+def _rss_mb(pid):
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024
+    except (OSError, ValueError):
+        pass
+    return 0.0
+
+
+_READ_ERRORS = {
+    "pdf_encrypted": "Password-protected PDFs can't be read. Please upload an unprotected copy.",
+    "pdf_no_pages": "The PDF has no pages.",
+    "pdf_too_many_pages": "The PDF has too many pages. Please upload only your visa page.",
+    "pdf_damaged": "The PDF could not be read - it may be damaged.",
+    "image_damaged": "The image could not be read - it may be damaged.",
+    "image_too_small": "The image is too small to show a legible visa.",
+    "image_too_large": "The image has too many pixels to process (over 24 MP for PNG, 120 MP for JPG). "
+                       "Please upload a normal photo or scan.",
+}
+
+
+def read_document_contents(file_bytes, ext):
+    """Runs the reader subprocess (one at a time per server) and returns
+    (text_layer, ocr_text, error_message). Returns (None, None, None) when
+    the document could not be read for ANY technical reason - missing
+    library, crash, timeout, memory limit, server busy. The caller treats
+    that as unreadable, i.e. FAIL."""
+    import tempfile
     with _OcrLock() as acquired:
         if not acquired:
-            return None
-        try:
-            proc = subprocess.run(
-                [sys.executable, _OCR_WORKER], input=image_bytes, capture_output=True,
-                timeout=OCR_TIMEOUT_SECONDS,
-            )
-            if proc.returncode != 0:
-                return None
-            lines = json.loads(proc.stdout.decode("utf-8") or "{}").get("lines")
-            return [str(x) for x in lines] if isinstance(lines, list) else None
-        except (subprocess.TimeoutExpired, OSError, ValueError):
-            return None
+            return None, None, None
+        with tempfile.TemporaryDirectory(prefix="visa-read-") as tmp:
+            src = os.path.join(tmp, "document")
+            out = os.path.join(tmp, "result.json")
+            with open(src, "wb") as fh:
+                fh.write(file_bytes)
+            try:
+                with open(out, "wb") as out_fh:
+                    proc = subprocess.Popen(
+                        [sys.executable, _OCR_WORKER, src, ext, str(OCR_WORK_BUDGET_SECONDS)],
+                        stdin=subprocess.DEVNULL, stdout=out_fh, stderr=subprocess.DEVNULL,
+                        close_fds=True, env=_OCR_ENV,
+                    )
+                    started = time.monotonic()
+                    while proc.poll() is None:
+                        if (time.monotonic() - started > OCR_TIMEOUT_SECONDS
+                                or _rss_mb(proc.pid) > OCR_MAX_RSS_MB):
+                            proc.kill()
+                            proc.wait()
+                            return None, None, None
+                        time.sleep(0.05)
+                if proc.returncode != 0:
+                    return None, None, None
+                with open(out, "rb") as fh:
+                    result = json.loads(fh.read().decode("utf-8") or "{}")
+            except (OSError, ValueError):
+                return None, None, None
+    if result.get("error"):
+        return None, None, _READ_ERRORS.get(result["error"], "The document could not be read.")
+    lines = result.get("ocr_lines") or []
+    return str(result.get("text_layer") or ""), "\n".join(str(x) for x in lines), None
 
 
 # ---------------------------------------------------------------------
-# File checks + reading the document
+# File checks (cheap, done in the web process - no decoding here)
 # ---------------------------------------------------------------------
-def _png_size(data):
-    if len(data) < 24 or data[12:16] != b"IHDR":
-        return None
-    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
-
-
-def _jpeg_size(data):
-    i = 2
-    while i + 9 < len(data):
-        if data[i] != 0xFF:
-            return None
-        marker = data[i + 1]
-        if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
-            i += 2
-            continue
-        seg_len = int.from_bytes(data[i + 2:i + 4], "big")
-        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
-            return int.from_bytes(data[i + 7:i + 9], "big"), int.from_bytes(data[i + 5:i + 7], "big")
-        i += 2 + seg_len
-    return None
-
-
-def _pdf_embedded_images(reader):
-    """Largest images embedded in the PDF's pages (a scanned visa page)."""
-    found = []
-    for page in reader.pages:
-        try:
-            for img in page.images:
-                data = img.data
-                if data and len(data) > 5_000:
-                    found.append(data)
-        except Exception:
-            continue
-    found.sort(key=len, reverse=True)
-    return found[:MAX_PDF_IMAGES_TO_READ]
-
-
-def read_document(data, filename):
-    """Checks the file and reads its text.
-
-    Returns (text, source, errors). `text` is None when nothing
-    machine-readable could be obtained. `source` is 'pdf-text', 'ocr' or None.
-    """
+def check_file(data, filename):
+    """Returns (ext, errors)."""
     if not filename:
-        return None, None, ["Please choose your visa document to upload."]
+        return None, ["Please choose your visa document to upload."]
     ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
     if ext not in ALLOWED_EXTENSIONS:
-        return None, None, ["Unsupported file type. Please upload a PDF, JPG, JPEG, or PNG file."]
+        return None, ["Unsupported file type. Please upload a PDF, JPG, JPEG, or PNG file."]
     if not data:
-        return None, None, ["The uploaded file is empty."]
+        return None, ["The uploaded file is empty."]
     if len(data) < MIN_FILE_BYTES:
-        return None, None, ["The uploaded file is too small to be a visa document."]
+        return None, ["The uploaded file is too small to be a visa document."]
     if len(data) > MAX_FILE_BYTES:
-        return None, None, [f"The uploaded file is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB."]
+        return None, [f"The uploaded file is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB."]
     if not data.startswith(_SIGNATURES[ext]):
-        return None, None, ["This file is not a valid PDF/JPG/PNG (its contents don't match its type)."]
-
-    if ext == "pdf":
-        try:
-            from pypdf import PdfReader
-            reader = PdfReader(io.BytesIO(data))
-            if reader.is_encrypted:
-                return None, None, ["Password-protected PDFs can't be read. Please upload an unprotected copy."]
-            if len(reader.pages) == 0:
-                return None, None, ["The PDF has no pages."]
-            if len(reader.pages) > MAX_PDF_PAGES:
-                return None, None, [f"The PDF has more than {MAX_PDF_PAGES} pages. Please upload only your visa page."]
-            text = "\n".join((p.extract_text() or "") for p in reader.pages)
-        except Exception:
-            return None, None, ["The PDF could not be read - it may be damaged."]
-        if find_us_visa_mrz(text):
-            return text, "pdf-text", []
-        # Scanned (image-only) PDF: read the embedded page image(s).
-        for image in _pdf_embedded_images(reader):
-            lines = ocr_image_lines(image)
-            if lines and find_us_visa_mrz("\n".join(lines)):
-                return text + "\n" + "\n".join(lines), "ocr", []
-        return (text if text.strip() else None), ("pdf-text" if text.strip() else None), []
-
-    size = _png_size(data) if ext == "png" else _jpeg_size(data)
-    if not size:
-        return None, None, ["The image could not be read - it may be damaged."]
-    if min(size) < MIN_IMAGE_SIDE:
-        return None, None, ["The image is too small to show a legible visa."]
-    lines = ocr_image_lines(data)
-    if not lines:
-        return None, None, []
-    return "\n".join(lines), "ocr", []
+        return None, ["This file is not a valid PDF/JPG/PNG (its contents don't match its type)."]
+    return ext, []
 
 
 # ---------------------------------------------------------------------
@@ -459,6 +438,25 @@ UNREADABLE_MESSAGE = (
 )
 
 
+def _checked_mrz(text, source, entered_pp):
+    """(mrz, passport_field, check_digits_ok) for one text source, or None.
+
+    Passport number: an OCR look-alike reading (O/0, I/1 ...) is replaced by
+    the entered number ONLY if it is the same number; the check digit must
+    then pass on the entered value, so a misread can never pass for a
+    different number."""
+    mrz = find_us_visa_mrz(text) if text else None
+    if not mrz:
+        return None
+    passport_field = mrz["passport_field"]
+    if entered_pp and source == "ocr" and _same_despite_ocr(passport_field.rstrip("<"), entered_pp):
+        passport_field = entered_pp + passport_field[len(entered_pp):]
+    ok = (mrz_check_digit(passport_field) == mrz["passport_cd"]
+          and mrz_check_digit(mrz["dob_raw"]) == mrz["dob_cd"]
+          and mrz_check_digit(mrz["expiry_raw"]) == mrz["expiry_cd"])
+    return mrz, passport_field, ok
+
+
 def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
     """applicant: {'full_name': str, 'date_of_birth': 'YYYY-MM-DD'}.
 
@@ -469,9 +467,9 @@ def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
     today = today or date.today()
     cleaned, errors = validate_details(form, today)
 
-    text, source, file_errors = read_document(file_bytes, filename)
+    ext, file_errors = check_file(file_bytes, filename)
     errors += file_errors
-    cleaned["read_from"] = source
+    cleaned["read_from"] = None
 
     dob = parse_iso_date(applicant.get("date_of_birth"))
     if not (applicant.get("full_name") or "").strip() or not dob:
@@ -483,23 +481,30 @@ def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
 
     if file_errors:
         return False, cleaned, errors
-    mrz = find_us_visa_mrz(text) if text else None
-    if not mrz:
-        errors.append(UNREADABLE_MESSAGE)
+
+    text_layer, ocr_text, read_error = read_document_contents(file_bytes, ext)
+    if read_error:
+        errors.append(read_error)
         return False, cleaned, errors
 
-    # Passport number: accept an OCR look-alike reading ONLY if it is the
-    # same number as entered; the check digit must then pass on the
-    # entered value, so a misread can never pass for a different number.
-    passport_field = mrz["passport_field"]
+    # Each source is judged on its own; the first whose machine-readable
+    # lines pass their check digits is the ONLY text every later check uses.
     entered_pp = cleaned["passport_number"]
-    if entered_pp and source == "ocr" and _same_despite_ocr(passport_field.rstrip("<"), entered_pp):
-        passport_field = entered_pp + passport_field[len(entered_pp):]
+    chosen = None
+    for source, text in (("pdf-text", text_layer), ("ocr", ocr_text)):
+        found = _checked_mrz(text, source, entered_pp)
+        if found and (found[2] or chosen is None):
+            chosen = (source, text) + found
+            if found[2]:
+                break
+    if not chosen:
+        errors.append(UNREADABLE_MESSAGE)
+        return False, cleaned, errors
+    source, text, mrz, passport_field, check_digits_ok = chosen
+    cleaned["read_from"] = source
     mrz_passport = passport_field.replace("<", "")
 
-    if (mrz_check_digit(passport_field) != mrz["passport_cd"]
-            or mrz_check_digit(mrz["dob_raw"]) != mrz["dob_cd"]
-            or mrz_check_digit(mrz["expiry_raw"]) != mrz["expiry_cd"]):
+    if not check_digits_ok:
         errors.append("The visa's machine-readable lines failed their check digits "
                       "(the document is unreadable, altered, or not a genuine layout).")
         return False, cleaned, errors
@@ -526,7 +531,7 @@ def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
     printed = (text or "").upper()
     if cleaned["visa_type"] in STUDENT_VISA_CLASSES:
         letter = cleaned["visa_type"][0]
-        if not re.search(rf"(?<![A-Z0-9]){letter}-?[1I](?![A-Z0-9])", printed):
+        if not re.search(rf"(?<![A-Z0-9]){letter}-?[1IL](?![A-Z0-9])", printed):
             errors.append(f"The visa class {cleaned['visa_type']} could not be read on the visa document.")
     if issue:
         wanted = _foil_date(issue).translate(_TO_DIGIT)
