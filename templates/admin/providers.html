@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Admin — Provider Referrals{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">Provider Referrals</h2>
+  {% include 'admin/_nav.html' %}
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <table class="table table-sm">
+        <thead><tr><th>Student</th><th>Opportunity</th><th>Status</th><th>Update</th></tr></thead>
+        <tbody>
+        {% for r in referrals %}
+          <tr>
+            <td>{{ r.full_name }}</td>
+            <td>{{ r.title }}</td>
+            <td><span class="badge bg-info text-dark">{{ r.status }}</span></td>
+            <td>
+              <form method="POST" action="{{ url_for('admin_update_referral_status', referral_id=r.id) }}" class="d-flex gap-1">
+                <select name="status" class="form-select form-select-sm">
+                  {% for s in ['Referred','Application Started','Application Submitted','Provider Review','Closed'] %}
+                  <option {{ 'selected' if r.status == s }}>{{ s }}</option>
+                  {% endfor %}
+                </select>
+                <button class="btn btn-sm btn-outline-primary">Update</button>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="text-muted text-center">No referrals yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

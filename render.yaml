@@ -1,0 +1,31 @@
+# Render Blueprint (optional - you can also set these in the dashboard).
+# The persistent disk at /var/data keeps the database, uploads and the
+# session key across deploys. Disks need a paid instance type on Render.
+services:
+  - type: web
+    name: africa-scholarbridge
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_PATH
+        value: /var/data/scholarbridge.db
+      - key: UPLOAD_ROOT
+        value: /var/data/uploads
+      - key: ADMIN_EMAIL
+        value: africascholarbridge@gmail.com
+      - key: MPESA_PHONE_NUMBER
+        value: "0181785792"
+      - key: VISA_APPLICATION_FEE
+        value: "1500"
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: SECRET_KEY
+        generateValue: true
+    disk:
+      name: scholarbridge-data
+      mountPath: /var/data
+      sizeGB: 1

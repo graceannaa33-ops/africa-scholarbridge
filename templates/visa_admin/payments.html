@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Visa Payments — Visa Admin{% endblock %}
+{% block content %}
+<div class="container-fluid py-4 px-3 px-lg-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-cash-coin"></i> Visa Payments</h2>
+    <p class="mb-0 text-muted">Direct M-PESA payments submitted by students. A submitted SMS or screenshot is <strong>not</strong> proof of payment — check the receiving M-PESA account, then verify or reject.</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="row g-3 my-2">
+    <div class="col-4 col-md-3"><a class="text-decoration-none text-reset" href="{{ url_for('visa_admin_payments', status='PAYMENT_PENDING') }}"><div class="card asb-visa-stat-card h-100"><div class="card-body"><p class="text-muted small mb-1">Pending Verification</p><h4 class="fw-bold mb-0">{{ totals.pending }}</h4></div></div></a></div>
+    <div class="col-4 col-md-3"><a class="text-decoration-none text-reset" href="{{ url_for('visa_admin_payments', status='PAYMENT_VERIFIED') }}"><div class="card asb-visa-stat-card accent-green h-100"><div class="card-body"><p class="text-muted small mb-1">Verified</p><h4 class="fw-bold mb-0">{{ totals.approved }}</h4></div></div></a></div>
+    <div class="col-4 col-md-3"><a class="text-decoration-none text-reset" href="{{ url_for('visa_admin_payments', status='PAYMENT_REJECTED') }}"><div class="card asb-visa-stat-card accent-red h-100"><div class="card-body"><p class="text-muted small mb-1">Rejected</p><h4 class="fw-bold mb-0">{{ totals.rejected }}</h4></div></div></a></div>
+  </div>
+  {% if status_filter %}<p class="small">Showing: <strong>{{ status_labels.get(status_filter) }}</strong> · <a href="{{ url_for('visa_admin_payments') }}">Show all</a></p>{% endif %}
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle small">
+      <thead class="table-light"><tr>
+        <th>Student</th><th>Email / Phone</th><th>Application ID</th><th>Amount</th><th>Transaction Code</th>
+        <th>Extracted Recipient</th><th>Date / Time</th><th>Screenshot</th><th>Submitted (UTC)</th><th>Status</th><th>Flags</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for p in payments %}
+        <tr>
+          <td class="fw-semibold">{{ p.student_name_display }}</td>
+          <td>{{ p.student_email_display or '—' }}<br><span class="text-muted">{{ p.student_phone_display or '—' }}</span></td>
+          <td class="font-monospace">{{ p.request_number }}</td>
+          <td>{{ 'KSh {:,.0f}'.format(p.submitted_amount) if p.submitted_amount is not none else '—' }}
+            {% if p.expected_amount and p.submitted_amount is not none and p.submitted_amount != p.expected_amount %}<span class="badge bg-danger">≠ fee</span>{% endif %}</td>
+          <td class="font-monospace">{{ p.mpesa_transaction_code or p.transaction_reference or '—' }}
+            {% if p.code_source == 'manual' %}<br><span class="badge bg-secondary">typed</span>{% endif %}</td>
+          <td>{{ p.extracted_recipient_name or '—' }}<br><span class="text-muted">{{ p.extracted_recipient_phone or '' }}</span></td>
+          <td>{{ p.extracted_transaction_date or '—' }} {{ p.extracted_transaction_time or '' }}</td>
+          <td>{% if p.proof_file %}<a target="_blank" rel="noopener" href="{{ url_for('visa_admin_payment_proof_file', payment_id=p.id) }}">View</a>{% else %}—{% endif %}</td>
+          <td>{{ p.submitted_at or p.created_at }}</td>
+          <td><span class="badge {{ 'bg-success' if p.payment_status == 'PAYMENT_VERIFIED' else 'bg-danger' if p.payment_status == 'PAYMENT_REJECTED' else 'bg-warning text-dark' }}">{{ status_labels.get(p.payment_status, p.payment_status) }}</span></td>
+          <td>{% if p.flag_count %}<span class="badge bg-warning text-dark" title="{{ p.flags | selectattr('severity','ne','ok') | map(attribute='message') | join(' | ') }}">⚠ {{ p.flag_count }}</span>{% else %}<span class="text-success">✓</span>{% endif %}</td>
+          <td><a href="{{ url_for('visa_admin_payment_detail', payment_id=p.id) }}" class="btn btn-sm {{ 'btn-primary' if p.payment_status == 'PAYMENT_PENDING' else 'btn-outline-secondary' }}">{{ 'Review' if p.payment_status == 'PAYMENT_PENDING' else 'Open' }}</a></td>
+        </tr>
+      {% else %}<tr><td colspan="12" class="text-muted text-center py-3">No payment submissions{{ ' with this status' if status_filter }} yet.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

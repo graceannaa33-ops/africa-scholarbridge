@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Visa Admin Dashboard — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-shield-lock"></i> 🇺🇸 U.S. Student Visa Admin</h2>
+    <p class="mb-0 text-muted">A dedicated, separate portal for visa assistance operations only.</p>
+  </div>
+
+  {% include 'visa_admin/_nav.html' %}
+
+  {% if pending_payments %}
+  <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span>💳 <strong>{{ pending_payments }}</strong> M-PESA payment(s) awaiting verification.</span>
+    <a href="{{ url_for('visa_admin_payments', status='PAYMENT_PENDING') }}" class="btn btn-sm btn-dark">Review Visa Payments</a>
+  </div>
+  {% endif %}
+
+  {% if information_required %}
+  <div class="alert alert-warning small">
+    ⏸️ {{ information_required }} request(s) are paused awaiting information from the student.
+    See <a href="{{ url_for('visa_admin_requests', status='information_required') }}">Visa Requests</a>.
+  </div>
+  {% endif %}
+
+  <div class="row g-3 my-2">
+    {% for label, value, accent in [
+        ('Visa Requests', stats.requests, ''), ('Paid Requests', stats.paid, 'accent-green'),
+        ('Applications Unlocked', stats.unlocked, 'accent-green'), ('Visa Submissions', stats.submissions, ''),
+        ('Submissions Complete', stats.submissions_complete, 'accent-green'), ('Processing', stats.processing, ''),
+        ('Completed', stats.completed, 'accent-green'), ('Fee Coverage Total', stats.fee_coverage_total, 'accent-red')] %}
+    <div class="col-6 col-md-3">
+      <div class="card asb-visa-stat-card {{ accent }} h-100"><div class="card-body">
+        <p class="text-muted small mb-1">{{ label }}</p>
+        <h4 class="fw-bold mb-0">
+          {% if 'Fee Coverage' in label %}{{ format_usd(value) if format_usd else ('$%.2f' % value) }}{% else %}{{ value }}{% endif %}
+        </h4>
+      </div></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="card asb-card mt-2">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">Recent Visa Requests</h5>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover">
+          <thead><tr><th>Reference</th><th>Student</th><th>Payment</th><th>Status</th><th>Fee Coverage</th><th></th></tr></thead>
+          <tbody>
+          {% for r in recent_requests %}
+            <tr>
+              <td>{{ r.request_number }}</td>
+              <td>{{ r.student_name }}</td>
+              <td><span class="badge {{ 'bg-success' if r.payment_status == 'paid' else 'bg-secondary' }}">{{ r.payment_status.replace('_',' ')|title }}</span></td>
+              <td><span class="badge bg-info text-dark">{{ r.application_status.replace('_',' ')|title }}</span></td>
+              <td><span class="badge bg-secondary">{{ r.visa_fee_coverage_status }}</span></td>
+              <td><a href="{{ url_for('visa_admin_request_detail', request_id=r.id) }}" class="btn btn-sm btn-outline-primary">View</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6" class="text-muted text-center py-3">No visa requests yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <p class="text-center small text-muted mt-4 mb-0">Africa ScholarBridge — {{ app_version }}</p>
+</div>
+{% endblock %}

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Application Submitted — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-7 text-center">
+      <div class="card asb-card shadow-sm border-success">
+        <div class="card-body p-5">
+          <i class="bi bi-check-circle-fill display-3 text-success"></i>
+          <h3 class="fw-bold mt-3">✅ Application Submitted Successfully</h3>
+          <p class="text-muted">Your Africa ScholarBridge annual funding application has been successfully submitted.</p>
+
+          <table class="table table-sm text-start mt-4">
+            <tr><th>Application Reference</th><td class="fw-bold text-primary">{{ application.reference_number }}</td></tr>
+            <tr><th>Submission Date</th>
+              <td>{{ application.submitted_at[:10] if application.submitted_at else '—' }}</td></tr>
+            <tr><th>Application Cycle</th><td>{{ cycle.name if cycle else '—' }}</td></tr>
+            <tr><th>Status</th><td><span class="badge asb-badge-type">{{ application.status }}</span></td></tr>
+          </table>
+
+          {% if application.confirmation_email_status == 'SENT' %}
+            <div class="alert alert-success small mb-0">
+              📧 A confirmation email has been sent to your registered email address.
+            </div>
+          {% elif application.confirmation_email_status == 'FAILED' %}
+            <div class="alert alert-warning small mb-0">
+              Your application was successfully submitted. We could not deliver the confirmation email
+              at this time. Please check your email address or contact support.
+            </div>
+          {% endif %}
+
+          <div class="d-flex justify-content-center gap-2 mt-4 flex-wrap">
+            <a href="{{ url_for('matches') }}" class="btn btn-primary fw-semibold">View My Funding Matches</a>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-outline-primary">Go to My Dashboard</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

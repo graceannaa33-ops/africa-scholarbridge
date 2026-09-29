@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Visa Admin Login — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-5">
+      <div class="card asb-card shadow-sm" style="border-top: 4px solid var(--asb-visa-blue);">
+        <div class="card-body p-4 p-md-5">
+          <h2 class="fw-bold mb-1"><i class="bi bi-shield-lock"></i> 🇺🇸 Visa Admin Login</h2>
+          <p class="text-muted mb-4">
+            A completely separate login for the U.S. Student Visa Assistance service. This is
+            NOT the same session as the Main Africa ScholarBridge Admin - logging in here never
+            grants access to <code>/admin/dashboard</code>, and logging into the Main Admin never
+            grants access here.
+          </p>
+          <form method="POST">
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control" required autofocus>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn w-100 fw-semibold text-white" style="background: var(--asb-visa-blue);">
+              Log In as Visa Admin
+            </button>
+          </form>
+          <div class="alert alert-info small mt-3 mb-0">
+            Administrator accounts are set up on the server with <code>python create_admin.py</code>.
+            Already signed in at <code>/admin/login</code> as a full administrator? You don't need to sign in again.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

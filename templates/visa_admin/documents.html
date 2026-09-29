@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Visa Documents — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-file-earmark-lock"></i> Visa Documents</h2>
+    <p class="mb-0 text-muted">Access is restricted to authenticated Visa Admin accounts only. The Main Admin has no access to this page.</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <h5 class="fw-bold mt-4 mb-2">Students Who Already Have a Visa (uploaded proof)</h5>
+  <p class="text-muted small mb-2">
+    These students answered "YES — I HAVE MY VISA" on their annual funding application and uploaded proof directly.
+    No Africa ScholarBridge assistance payment was collected for these cases.
+  </p>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-hover">
+      <thead><tr>
+        <th>Student</th><th>Application Ref.</th><th>Visa Type</th><th>Status</th><th>Uploaded</th><th>Document</th>
+      </tr></thead>
+      <tbody>
+      {% for u in has_visa_uploads %}
+        <tr>
+          <td>{{ u.student_name }}</td>
+          <td>{{ u.reference_number or '—' }}</td>
+          <td>{{ u.visa_document_type or '—' }}</td>
+          <td>
+            <span class="badge {{ 'bg-success' if u.visa_document_status == 'UPLOADED' else 'bg-secondary' }}">
+              {{ u.visa_document_status }}
+            </span>
+          </td>
+          <td class="small text-muted">{{ u.visa_document_uploaded_at or '—' }}</td>
+          <td>
+            {% if u.visa_document_status == 'UPLOADED' %}
+              <a href="{{ url_for('visa_admin_visa_document_view', application_id=u.application_id) }}" target="_blank" class="btn btn-sm btn-outline-secondary">View Document</a>
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="text-muted text-center py-3">No students have uploaded existing-visa proof yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h5 class="fw-bold mb-2">Visa Assistance Documents (paid cases)</h5>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr>
+        <th>Student</th><th>Visa Reference</th><th>Document</th><th>Status</th><th>Submitted</th><th>Reviewed</th><th>Notes</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+      {% for d in documents %}
+        <tr>
+          <td>{{ d.student_name }}</td>
+          <td>{{ d.request_number }}</td>
+          <td>{{ d.document_type }}{% if d.is_required %} <span class="text-danger">*</span>{% endif %}</td>
+          <td>
+            <span class="badge {{ 'bg-success' if d.status in ['Uploaded','Verified'] else 'bg-warning text-dark' if d.status == 'Replacement Requested' else 'bg-secondary' }}">
+              {{ d.status }}
+            </span>
+          </td>
+          <td class="small text-muted">{{ d.uploaded_at or '—' }}</td>
+          <td class="small text-muted">{{ d.reviewed_at or '—' }}</td>
+          <td class="small">{{ d.admin_notes or '—' }}</td>
+          <td style="min-width: 260px;">
+            <form method="POST" class="d-flex flex-column gap-1">
+              <input type="hidden" name="document_id" value="{{ d.id }}">
+              <input type="text" name="admin_notes" class="form-control form-control-sm" placeholder="Internal note" value="{{ d.admin_notes or '' }}">
+              <div class="d-flex gap-1">
+                <button type="submit" name="action" value="mark_reviewed" class="btn btn-sm btn-success" {{ 'disabled' if d.status == 'Missing' }}>Mark Reviewed</button>
+                <button type="submit" name="action" value="request_replacement" class="btn btn-sm btn-outline-warning" {{ 'disabled' if d.status == 'Missing' }}>Request Replacement</button>
+                <button type="submit" name="action" value="add_notes" class="btn btn-sm btn-outline-secondary">Save Note</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="text-muted text-center py-3">No documents yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

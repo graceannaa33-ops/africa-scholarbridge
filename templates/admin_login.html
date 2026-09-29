@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Admin Login — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-5">
+      <div class="card asb-card shadow-sm border-warning">
+        <div class="card-body p-4 p-md-5">
+          <h2 class="fw-bold mb-1"><i class="bi bi-shield-lock"></i> Admin Login</h2>
+          <p class="text-muted mb-4">Restricted access for Africa ScholarBridge administrators.</p>
+          <form method="POST">
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <input type="password" name="password" class="form-control" required>
+            </div>
+            <button type="submit" class="btn btn-dark w-100 fw-semibold">Log In as Admin</button>
+          </form>
+          <div class="alert alert-info small mt-3 mb-0">
+            Administrator accounts are set up on the server with <code>python create_admin.py</code>.
+            Signing in here also opens Visa Admin (Visa Payments) for accounts that hold both roles.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

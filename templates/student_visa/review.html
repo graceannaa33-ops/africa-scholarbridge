@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Submit Visa Application — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <h2 class="fw-bold mb-3">Submit Your Visa Assistance Application</h2>
+      <div class="card asb-card shadow-sm mb-4">
+        <div class="card-body p-4">
+          <p><strong>Reference:</strong> {{ visa_request.request_number }}</p>
+          <p><strong>Applicant:</strong> {{ visa_request.full_name }}</p>
+          <p><strong>Visa Category:</strong> {{ visa_request.visa_category or '—' }}</p>
+          <p class="mb-0"><strong>Assistance Requested:</strong> {{ visa_request.assistance_required or '—' }}</p>
+        </div>
+      </div>
+      <div class="alert alert-info">
+        ⏱️ <strong>Processing Time: Up to 2 Weeks</strong><br>
+        This 2-week timeline applies to Africa ScholarBridge's own assistance service. It does not
+        represent a promise of U.S. government visa approval or a specific U.S. government appointment
+        or processing timeline.
+      </div>
+      <form method="POST">
+        <button type="submit" class="btn btn-primary btn-lg fw-semibold">Submit Application</button>
+        <a href="{{ url_for('student_visa_step', request_id=visa_request.id, step_name='review') }}" class="btn btn-outline-secondary btn-lg">Edit</a>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

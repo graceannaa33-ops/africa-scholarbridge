@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Admin — Funding Decisions{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">Funding Decisions</h2>
+  {% include 'admin/_nav.html' %}
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <table class="table table-sm align-middle">
+        <thead><tr><th>Student</th><th>Opportunity</th><th>Current Decision</th><th>Record / Update Decision</th></tr></thead>
+        <tbody>
+        {% for r in referrals %}
+          <tr>
+            <td>{{ r.full_name }}</td>
+            <td>{{ r.title }}</td>
+            <td>
+              {% if r.decision %}<span class="badge bg-info text-dark">{{ r.decision }}</span>{% else %}<span class="text-muted">Not recorded</span>{% endif %}
+            </td>
+            <td>
+              <form method="POST" class="row g-1">
+                <input type="hidden" name="referral_id" value="{{ r.referral_id }}">
+                <div class="col-3">
+                  <select name="decision" class="form-select form-select-sm">
+                    {% for d in ['Pending','Funded','Partially Funded','Waitlisted','Unsuccessful'] %}
+                    <option {{ 'selected' if r.decision == d }}>{{ d }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="col-2"><input type="text" name="funding_amount" class="form-control form-control-sm" placeholder="Amount" value="{{ r.funding_amount or '' }}"></div>
+                <div class="col-2"><input type="text" name="coverage" class="form-control form-control-sm" placeholder="Coverage"></div>
+                <div class="col-2"><input type="text" name="provider_reference" class="form-control form-control-sm" placeholder="Provider Ref"></div>
+                <div class="col-2"><input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes" value="{{ r.notes or '' }}"></div>
+                <div class="col-1"><button class="btn btn-sm btn-primary w-100">Save</button></div>
+              </form>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="4" class="text-muted text-center">No referrals yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

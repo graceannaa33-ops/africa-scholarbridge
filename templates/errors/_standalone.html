@@ -1,0 +1,49 @@
+{#- Standalone error page layout: does NOT extend base.html, uses no
+    database, no url_for and no external files, so it renders even when
+    the rest of the site is failing. -#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Error{% endblock %} — Africa ScholarBridge</title>
+  <meta name="robots" content="noindex">
+  <style>
+    :root { --blue:#0b3d66; --blue-dark:#072943; --gold:#f2a900; --ink:#1d2733; --muted:#5b6775; --bg:#f7f9fb; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:flex; flex-direction:column; background:var(--bg); color:var(--ink);
+           font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+    header { background:linear-gradient(135deg,var(--blue-dark),var(--blue)); padding:14px 16px; }
+    header a { color:#fff; font-weight:700; font-size:1.15rem; text-decoration:none; }
+    header span { color:var(--gold); }
+    main { flex:1; display:flex; align-items:center; justify-content:center; padding:48px 16px; }
+    .card { background:#fff; border-radius:14px; box-shadow:0 6px 24px rgba(7,41,67,.10); padding:40px 28px;
+            max-width:520px; width:100%; text-align:center; }
+    .code { font-size:clamp(3.5rem,14vw,5.5rem); font-weight:800; line-height:1; color:var(--blue); margin:0 0 8px; }
+    h1 { font-size:1.35rem; margin:0 0 10px; }
+    p { color:var(--muted); margin:0 0 24px; }
+    .actions { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+    .btn { display:inline-block; padding:11px 20px; border-radius:8px; font-weight:600; text-decoration:none; }
+    .btn-primary { background:var(--blue); color:#fff; }
+    .btn-primary:hover, .btn-primary:focus { background:var(--blue-dark); }
+    .btn-outline { border:2px solid var(--blue); color:var(--blue); }
+    a:focus-visible { outline:3px solid var(--gold); outline-offset:2px; }
+    footer { text-align:center; color:var(--muted); font-size:.85rem; padding:18px 16px; }
+  </style>
+</head>
+<body>
+  <header><a href="/">🎓 Africa <span>ScholarBridge</span></a></header>
+  <main>
+    <div class="card" role="alert">
+      <p class="code">{% block code %}{% endblock %}</p>
+      <h1>{% block heading %}{% endblock %}</h1>
+      <p>{% block message %}{% endblock %}</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/">Go to the homepage</a>
+        {% block extra_action %}<a class="btn btn-outline" href="javascript:history.back()">Go back</a>{% endblock %}
+      </div>
+    </div>
+  </main>
+  <footer>Africa ScholarBridge — One Application. Multiple Funding Opportunities. One Annual Cycle.</footer>
+</body>
+</html>

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Admin — Funding Cycles{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">Annual Funding Cycles</h2>
+  {% include 'admin/_nav.html' %}
+
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">Create New Cycle</h5>
+          <form method="POST">
+            <input type="hidden" name="action" value="create">
+            <div class="mb-2"><label class="form-label">Name</label><input type="text" name="name" class="form-control" placeholder="2027/2028 Funding Cycle" required></div>
+            <div class="mb-2"><label class="form-label">Year</label><input type="text" name="year" class="form-control" placeholder="2027/2028" required></div>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label small">Open Date</label><input type="date" name="open_date" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Close Date</label><input type="date" name="close_date" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Review Start</label><input type="date" name="review_start" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Matching Start</label><input type="date" name="matching_start" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Notification Date</label><input type="date" name="notification_date" class="form-control"></div>
+            </div>
+            <button type="submit" class="btn btn-primary w-100 mt-3">Create Cycle</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">Existing Cycles</h5>
+          <table class="table table-sm">
+            <thead><tr><th>Cycle</th><th>Status</th><th>Applications</th><th></th></tr></thead>
+            <tbody>
+            {% for c in cycles %}
+              <tr>
+                <td>{{ c.name }} {% if c.is_current %}<span class="badge bg-success">Current</span>{% endif %}</td>
+                <td>{{ c.status }}</td>
+                <td>{{ cycle_stats.get(c.id, 0) }}</td>
+                <td class="d-flex gap-1">
+                  <form method="POST"><input type="hidden" name="action" value="set_current"><input type="hidden" name="cycle_id" value="{{ c.id }}">
+                    <button class="btn btn-sm btn-outline-success">Make Current &amp; Open</button></form>
+                  <form method="POST"><input type="hidden" name="action" value="close"><input type="hidden" name="cycle_id" value="{{ c.id }}">
+                    <button class="btn btn-sm btn-outline-secondary">Close</button></form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

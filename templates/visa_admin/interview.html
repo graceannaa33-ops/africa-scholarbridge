@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Interview Preparation — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-mic"></i> Interview Preparation Reference</h2>
+    <p class="mb-0 text-muted">Read-only reference of the interview-preparation content shown to students, so the Visa Admin can review it while working a case.</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <h5 class="fw-bold mb-3">Common Practice Questions (Student-Facing)</h5>
+      <ul class="list-group">
+        {% for q in [
+          'Why did you choose this university?',
+          'Why did you choose this course?',
+          'What are your academic goals?',
+          'How will your education be financed?',
+          'Why do you want to study in the United States?',
+          'What do you know about your program?',
+          'What are your plans after completing your studies?',
+          'Why this institution?',
+          'How does the program relate to your career goals?'
+        ] %}
+        <li class="list-group-item">{{ q }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div class="col-lg-5">
+      <div class="card asb-card">
+        <div class="card-body p-4">
+          <h5 class="fw-bold mb-3">Preparation Guidance Shown to Students</h5>
+          <ul class="small">
+            <li class="mb-2">Give honest, clear answers.</li>
+            <li class="mb-2">Understand your chosen program in depth.</li>
+            <li class="mb-2">Understand your funding arrangements.</li>
+            <li class="mb-2">Prepare relevant documentation in advance.</li>
+            <li class="mb-2">Follow official instructions from the consulate/embassy.</li>
+          </ul>
+          <p class="small text-muted mb-0">This content lives in <code>templates/student_visa/interview.html</code> and is shared, read-only, on this reference page.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

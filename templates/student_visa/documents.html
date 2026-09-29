@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Visa Documents — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">🇺🇸 Visa Document Checklist</h2>
+  <p class="text-muted mb-4">Reference: {{ visa_request.request_number }}</p>
+
+  <div class="alert alert-info small">
+    Requirements can vary by consulate and case. Always verify current requirements with official
+    U.S. government resources — see <a href="{{ url_for('student_visa_resources') }}">Official U.S. Resources</a>.
+  </div>
+
+  {% if visa_request.payment_status != 'paid' %}
+    <div class="alert alert-warning">Complete payment to upload documents. <a href="{{ url_for('student_visa_payment', request_id=visa_request.id) }}">Go to payment</a>.</div>
+  {% endif %}
+
+  <div class="list-group">
+    {% for d in documents %}
+    <div class="list-group-item d-flex justify-content-between align-items-center flex-wrap">
+      <div>
+        <strong>{{ d.document_type }}</strong>
+        <span class="text-muted small">{{ '(required)' if d.is_required else '(if applicable)' }}</span>
+      </div>
+      <div class="d-flex align-items-center gap-3">
+        <span class="badge {{ 'bg-success' if d.status == 'Uploaded' else 'bg-warning text-dark' if d.status == 'Verified' else 'bg-secondary' }}">{{ d.status }}</span>
+        {% if d.status == 'Missing' and visa_request.payment_status == 'paid' %}
+          <form method="POST">
+            <input type="hidden" name="document_id" value="{{ d.id }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,20 @@
+<!--
+  The Visa Admin's OWN navigation - entirely separate from admin/_nav.html.
+  It never links back into /admin/* funding-management pages, and the Main
+  Admin nav never links into these pages either (except the one small
+  "Visa Services" redirect to /visa-admin/login).
+-->
+<ul class="nav asb-visa-admin-nav mb-3 flex-wrap">
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_dashboard' }}" href="{{ url_for('visa_admin_dashboard') }}">Dashboard</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint in ['visa_admin_requests', 'visa_admin_request_detail'] }}" href="{{ url_for('visa_admin_requests') }}">Visa Requests</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_payments' }}" href="{{ url_for('visa_admin_payments') }}">Visa Payments</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_submissions' }}" href="{{ url_for('visa_admin_submissions') }}">Visa Submissions</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_documents' }}" href="{{ url_for('visa_admin_documents') }}">Visa Documents</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_fee_coverage' }}" href="{{ url_for('visa_admin_fee_coverage') }}">Fee Coverage</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_processing' }}" href="{{ url_for('visa_admin_processing') }}">Processing</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_interview' }}" href="{{ url_for('visa_admin_interview') }}">Interview Prep</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_notifications' }}" href="{{ url_for('visa_admin_notifications') }}">Notifications</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_reports' }}" href="{{ url_for('visa_admin_reports') }}">Reports</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'visa_admin_settings' }}" href="{{ url_for('visa_admin_settings') }}">Settings</a></li>
+  <li class="nav-item ms-auto"><a class="nav-link text-danger-light" href="{{ url_for('visa_admin_logout') }}">Logout</a></li>
+</ul>

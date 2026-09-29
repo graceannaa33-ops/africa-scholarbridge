@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Payment {{ payment.mpesa_transaction_code or payment.id }} — Visa Admin{% endblock %}
+{% block content %}
+{% set pending = payment.payment_status == 'PAYMENT_PENDING' %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-cash-coin"></i> Visa Payment Review</h2>
+    <p class="mb-0 text-muted">{{ payment.student_name_display }} · {{ payment.request_number }}</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+  <p class="small"><a href="{{ url_for('visa_admin_payments') }}">&larr; All Visa Payments</a> · <a href="{{ url_for('visa_admin_request_detail', request_id=payment.request_id) }}">Open visa request</a></p>
+
+  <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+    <span class="fs-5">Status:</span>
+    <span class="badge fs-6 {{ 'bg-success' if payment.payment_status == 'PAYMENT_VERIFIED' else 'bg-danger' if payment.payment_status == 'PAYMENT_REJECTED' else 'bg-warning text-dark' }}">{{ status_labels.get(payment.payment_status, payment.payment_status) }}</span>
+    <code class="small">{{ payment.payment_status }}</code>
+  </div>
+
+  <div class="alert alert-info small">
+    <strong>Manual verification.</strong> Payments go straight to the phone number {{ mpesa_receiving_number }}, so this system has no
+    connection to Safaricom and cannot confirm them. The details below were read from text the student submitted and may
+    have been edited. Check that the money actually arrived on the receiving M-PESA phone before clicking <strong>VERIFY PAYMENT</strong>.
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-6">
+      <div class="card asb-card mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-3">Student</h5>
+        <table class="table table-sm small mb-0">
+          <tr><th style="width:40%">Name</th><td>{{ payment.student_name_display }}</td></tr>
+          <tr><th>Email</th><td>{{ payment.student_email_display or '—' }}</td></tr>
+          <tr><th>Profile phone</th><td>{{ payment.student_phone_display or '—' }}</td></tr>
+          <tr><th>Phone paid from (student-entered)</th><td>{{ payment.phone_number or '—' }}</td></tr>
+          <tr><th>Application ID</th><td class="font-monospace">{{ payment.request_number }}{% if payment.annual_reference %}<br><span class="text-muted">Annual application {{ payment.annual_reference }}</span>{% endif %}</td></tr>
+          <tr><th>Submitted (UTC)</th><td>{{ payment.submitted_at or payment.created_at }}</td></tr>
+          {% if payment.additional_comment %}<tr><th>Student comment</th><td>{{ payment.additional_comment }}</td></tr>{% endif %}
+        </table>
+      </div></div>
+
+      <div class="card asb-card mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-2">Student Submitted Message</h5>
+        {% if payment.submitted_mpesa_message %}
+          <pre class="bg-light border rounded p-2 small mb-3" style="white-space: pre-wrap; word-break: break-word;">{{ payment.submitted_mpesa_message }}</pre>
+        {% else %}
+          <p class="small text-muted">No SMS text submitted{{ ' — screenshot only. The transaction code below was TYPED by the student.' if payment.code_source == 'manual' else '.' }}</p>
+        {% endif %}
+        <table class="table table-sm small mb-2">
+          <tr><th style="width:40%">Expected amount</th><td>KSh {{ '{:,.0f}'.format(payment.expected_amount or visa_fee) }}</td></tr>
+          <tr><th>Submitted amount</th><td>{{ 'KSh {:,.2f}'.format(payment.submitted_amount) if payment.submitted_amount is not none else '—' }}</td></tr>
+          <tr><th>Transaction code</th><td class="font-monospace">{{ payment.mpesa_transaction_code or payment.transaction_reference or '—' }} {% if payment.code_source %}<span class="badge bg-secondary">{{ 'from SMS' if payment.code_source == 'sms' else 'typed' }}</span>{% endif %}</td></tr>
+          <tr><th>Extracted recipient</th><td>{{ payment.extracted_recipient_name or '—' }}</td></tr>
+          <tr><th>Extracted recipient phone</th><td>{{ payment.extracted_recipient_phone or '—' }}</td></tr>
+          <tr><th>Extracted date / time</th><td>{{ payment.extracted_transaction_date or '—' }} {{ payment.extracted_transaction_time or '' }}</td></tr>
+        </table>
+        {% if flags %}
+        <h6 class="fw-bold small mt-3">Automatic checks (aids only)</h6>
+        <ul class="list-unstyled small mb-0">
+          {% for f in flags %}
+          <li class="{{ 'text-success' if f.severity == 'ok' else 'text-danger' if f.severity == 'error' else 'text-warning-emphasis' }}">{{ '✓' if f.severity == 'ok' else '⚠' }} {{ f.message }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div></div>
+
+      <div class="card asb-card mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-2">Screenshot</h5>
+        {% if payment.proof_file %}
+          <a target="_blank" rel="noopener" href="{{ url_for('visa_admin_payment_proof_file', payment_id=payment.id) }}">
+            <img src="{{ url_for('visa_admin_payment_proof_file', payment_id=payment.id) }}" alt="M-PESA screenshot" class="img-fluid rounded border" style="max-height: 420px;">
+          </a>
+          <p class="small text-muted mt-1 mb-0">Click to open full size.</p>
+        {% else %}
+          <p class="small text-muted mb-0">No screenshot uploaded.</p>
+        {% endif %}
+      </div></div>
+    </div>
+
+    <div class="col-lg-6">
+      <div class="card asb-card mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-2">Incoming M-PESA Confirmation <span class="text-muted small fw-normal">(optional)</span></h5>
+        <p class="small text-muted">Paste the "You have received …" SMS that arrived on the receiving phone ({{ mpesa_receiving_number }}). It will be parsed so you can compare it with the student's message.</p>
+        <form method="POST">
+          <input type="hidden" name="action" value="save_incoming">
+          <textarea name="admin_incoming_mpesa_message" class="form-control font-monospace small mb-2" rows="4" placeholder="Paste incoming M-PESA message">{{ payment.admin_incoming_mpesa_message or '' }}</textarea>
+          <button type="submit" class="btn btn-sm btn-outline-primary">Parse &amp; Save Incoming Message</button>
+        </form>
+        {% if payment.admin_incoming_mpesa_message %}
+        <table class="table table-sm small mt-3 mb-0">
+          <tr><th style="width:40%">Incoming transaction code</th><td class="font-monospace">{{ payment.admin_transaction_code or '—' }}</td></tr>
+          <tr><th>Sender name</th><td>{{ payment.admin_sender_name or '—' }}</td></tr>
+          <tr><th>Sender phone</th><td>{{ payment.admin_sender_phone or '—' }}</td></tr>
+          <tr><th>Amount</th><td>{{ 'KSh {:,.2f}'.format(payment.admin_received_amount) if payment.admin_received_amount is not none else '—' }}</td></tr>
+          <tr><th>Date / time</th><td>{{ payment.admin_received_at or '—' }}</td></tr>
+        </table>
+        {% endif %}
+      </div></div>
+
+      <div class="card asb-card mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-3">Payment Matching Assistance</h5>
+        <div class="row g-2 small">
+          <div class="col-sm-6">
+            <div class="border rounded p-2 h-100">
+              <p class="fw-bold mb-1">Student Submitted Payment</p>
+              <div>Transaction Code: <span class="font-monospace">{{ student_side.transaction_code or '—' }}</span></div>
+              <div>Amount: {{ 'KSh {:,.2f}'.format(student_side.amount) if student_side.amount is not none else '—' }}</div>
+              <div>Recipient: {{ student_side.name or '—' }} {{ student_side.phone or '' }}</div>
+              <div>Date: {{ student_side.date or '—' }}</div>
+              <div>Time: {{ student_side.time or '—' }}</div>
+            </div>
+          </div>
+          <div class="col-sm-6">
+            <div class="border rounded p-2 h-100">
+              <p class="fw-bold mb-1">Admin Incoming Payment</p>
+              <div>Transaction Code: <span class="font-monospace">{{ incoming_side.transaction_code or '—' }}</span></div>
+              <div>Amount: {{ 'KSh {:,.2f}'.format(incoming_side.amount) if incoming_side.amount is not none else '—' }}</div>
+              <div>Sender: {{ incoming_side.name or '—' }}</div>
+              <div>Phone: {{ incoming_side.phone or '—' }}</div>
+              <div>Date: {{ incoming_side.date or '—' }}</div>
+              <div>Time: {{ incoming_side.time or '—' }}</div>
+            </div>
+          </div>
+        </div>
+        {% if comparison %}
+        <ul class="list-group list-group-flush small mt-3">
+          {% for c in comparison %}
+          <li class="list-group-item d-flex justify-content-between gap-2 px-0">
+            <span>{{ '✅' if c.state == 'match' else '❌' if c.state == 'mismatch' else '➖' }} {{ c.label }}</span>
+            <span class="text-muted text-end">{{ c.detail }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="small text-muted mt-3 mb-0">Paste the incoming M-PESA message above to see matching indicators.</p>
+        {% endif %}
+        <p class="small text-muted mt-2 mb-0">These indicators are verification aids only. They never change the payment status — you decide.</p>
+      </div></div>
+
+      <div class="card asb-card mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-2">Admin Notes</h5>
+        <form method="POST">
+          <input type="hidden" name="action" value="save_notes">
+          <textarea name="admin_notes" class="form-control form-control-sm mb-2" rows="2" maxlength="2000">{{ payment.admin_notes or '' }}</textarea>
+          <button type="submit" class="btn btn-sm btn-outline-secondary">Save Notes</button>
+        </form>
+      </div></div>
+
+      {% if pending %}
+      <div class="card border-success mb-3"><div class="card-body">
+        <h5 class="fw-bold mb-2">Verify</h5>
+        <form method="POST" action="{{ url_for('visa_admin_payment_proof_review', payment_id=payment.id) }}">
+          <input type="hidden" name="action" value="verify">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="confirm_received" value="yes" id="confirmReceived" required>
+            <label class="form-check-label small" for="confirmReceived">I have checked the receiving M-PESA account and confirm KSh {{ '{:,.0f}'.format(payment.expected_amount or visa_fee) }} from this student was actually received.</label>
+          </div>
+          <button type="submit" class="btn btn-success fw-bold w-100">VERIFY PAYMENT</button>
+        </form>
+      </div></div>
+      <div class="card border-danger mb-4"><div class="card-body">
+        <h5 class="fw-bold mb-2">Reject</h5>
+        <form method="POST" action="{{ url_for('visa_admin_payment_proof_review', payment_id=payment.id) }}">
+          <input type="hidden" name="action" value="reject">
+          <label class="form-label small" for="rejectionReason">Rejection reason (shown to the student)</label>
+          <input type="text" id="rejectionReason" name="rejection_reason" class="form-control form-control-sm mb-2" maxlength="500" required placeholder="e.g. No matching payment received on 27/9/26">
+          <button type="submit" class="btn btn-outline-danger fw-bold w-100">REJECT PAYMENT</button>
+        </form>
+      </div></div>
+      {% else %}
+      <div class="card asb-card mb-4"><div class="card-body small">
+        <h5 class="fw-bold mb-2">Decision</h5>
+        {% if payment.payment_status == 'PAYMENT_VERIFIED' %}
+          <p class="mb-1">Verified {{ payment.verified_at or payment.reviewed_at or '' }} UTC{% if payment.verified_by_name %} by {{ payment.verified_by_name }}{% endif %}.</p>
+          <p class="mb-0 text-muted">Method: {{ payment.verification_method or 'manual' }}</p>
+        {% else %}
+          <p class="mb-1">Rejected {{ payment.reviewed_at or '' }} UTC{% if payment.reviewed_by_name %} by {{ payment.reviewed_by_name }}{% endif %}.</p>
+          <p class="mb-0"><strong>Reason:</strong> {{ payment.rejection_reason or '—' }}</p>
+        {% endif %}
+      </div></div>
+      {% endif %}
+
+      {% if other_submissions %}
+      <div class="card asb-card"><div class="card-body small">
+        <h6 class="fw-bold">Other submissions for this request</h6>
+        <ul class="mb-0">
+          {% for o in other_submissions %}
+          <li><a href="{{ url_for('visa_admin_payment_detail', payment_id=o.id) }}" class="font-monospace">{{ o.mpesa_transaction_code or o.transaction_reference or ('#' ~ o.id) }}</a> — {{ status_labels.get(o.payment_status, o.payment_status) }} ({{ o.submitted_at or o.created_at }})</li>
+          {% endfor %}
+        </ul>
+      </div></div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

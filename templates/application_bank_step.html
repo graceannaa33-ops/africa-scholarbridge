@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}Annual Funding Application — 🏦 Funding Payment Information — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+
+  <h2 class="fw-bold mb-1">Annual Funding Application</h2>
+  <p class="text-muted mb-4">Step {{ step_index + 1 }} of {{ steps|length }}</p>
+
+  <div class="progress mb-4" style="height: 8px;">
+    <div class="progress-bar bg-success" role="progressbar"
+         style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
+  </div>
+
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body p-4 p-md-5">
+
+          {% if existing_details and existing_details.confirmed %}
+            <h4 class="fw-bold mb-3 text-success">✅ Funding Payment Information Saved</h4>
+            <p class="text-muted mb-3">Your bank/payment details have been recorded for this annual application.</p>
+            <table class="table table-sm">
+              <tr><th>Country</th><td>{{ existing_details.country }}</td></tr>
+              <tr><th>Bank</th><td>{{ existing_details.bank_name }}
+                {% if existing_details.verification_status == 'MANUAL_REVIEW' %}
+                  <span class="badge bg-warning text-dark ms-1">Manually Entered — Under Review</span>
+                {% endif %}
+              </td></tr>
+              <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
+              <tr><th>Account</th><td>{{ masked_account }}</td></tr>
+              <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
+              {% if existing_details.mobile_money_provider %}
+              <tr><th>Mobile Money</th><td>{{ existing_details.mobile_money_provider }} — •••• {{ (existing_details.mobile_money_number or '')[-4:] }}</td></tr>
+              {% endif %}
+            </table>
+            <div class="alert alert-info small">
+              If your funding application is approved by the relevant funding provider, payment will be handled
+              according to that provider's official disbursement process. Africa ScholarBridge does not guarantee
+              or directly send funding money — bank details are collected only when required for a legitimate
+              funding or payment process.
+            </div>
+            <div class="d-flex gap-2">
+              <form method="POST">
+                <input type="hidden" name="action" value="edit">
+                <button type="submit" class="btn btn-outline-secondary">Edit Details</button>
+              </form>
+              <form method="POST">
+                <input type="hidden" name="action" value="continue">
+                <button type="submit" class="btn btn-primary fw-semibold">CONTINUE APPLICATION &rarr;</button>
+              </form>
+            </div>
+
+          {% elif existing_details %}
+            <h4 class="fw-bold mb-3">Confirm Payment Information</h4>
+            <p class="text-muted mb-3">Please carefully check your bank details before submitting.</p>
+            <table class="table table-sm">
+              <tr><th>Country</th><td>{{ existing_details.country }}</td></tr>
+              <tr><th>Bank</th><td>{{ existing_details.bank_name }}</td></tr>
+              <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
+              <tr><th>Account</th><td>{{ masked_account }}</td></tr>
+              <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
+            </table>
+            <p class="small text-muted mb-3">These details may be used only when required by an eligible funding provider for payment processing.</p>
+            <form method="POST">
+              <input type="hidden" name="action" value="confirm">
+              <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" name="confirm_accurate" id="confirmAccurate" required>
+                <label class="form-check-label" for="confirmAccurate">I confirm that the bank information I provided is accurate.</label>
+              </div>
+              <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary fw-semibold">SAVE &amp; CONTINUE</button>
+              </div>
+            </form>
+            <form method="POST" class="mt-2">
+              <input type="hidden" name="action" value="edit">
+              <button type="submit" class="btn btn-link btn-sm px-0">Edit these details</button>
+            </form>
+
+          {% else %}
+            <h4 class="fw-bold mb-3">🏦 Funding Payment Information</h4>
+            <p class="mb-4">If your selected funding provider requires bank information for payment or reimbursement,
+              provide your bank details below. Requirements vary by funding provider and country.</p>
+
+            <form method="POST" id="bankDetailsForm">
+              <input type="hidden" name="action" value="save_details">
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Country</label>
+                <select name="country" id="bankCountry" class="form-select" required>
+                  <option value="">Select your country…</option>
+                  {% for c in countries %}
+                    <option value="{{ c }}">{{ c }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Search your bank</label>
+                <input type="text" id="bankSearch" class="form-control mb-2" placeholder="Search bank name, code, or SWIFT/BIC…" disabled>
+                <select name="bank_id" id="bankSelect" class="form-select" disabled>
+                  <option value="">Select your country first…</option>
+                </select>
+                <div class="form-check mt-2">
+                  <input class="form-check-input" type="checkbox" id="bankNotListed">
+                  <label class="form-check-label small" for="bankNotListed">My bank is not listed</label>
+                </div>
+                <input type="text" name="manual_bank_name" id="manualBankName" class="form-control mt-2" placeholder="Enter your bank's name" style="display:none;">
+              </div>
+
+              <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                  <label class="form-label">Account Holder Name</label>
+                  <input type="text" name="account_holder_name" class="form-control" placeholder="Exactly as it appears on your account">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Account Number</label>
+                  <input type="text" name="account_number" class="form-control" autocomplete="off">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Account Type</label>
+                  <select name="account_type" class="form-select">
+                    {% for t in account_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Branch <span class="text-muted small">(optional)</span></label>
+                  <input type="text" name="branch" class="form-control">
+                </div>
+                <div class="col-md-6" id="bankCodeField" style="display:none;">
+                  <label class="form-label">Bank Code / SWIFT / BIC</label>
+                  <input type="text" name="bank_code" class="form-control" placeholder="Bank code">
+                </div>
+                <div class="col-md-6" id="swiftField" style="display:none;">
+                  <label class="form-label">SWIFT / BIC</label>
+                  <input type="text" name="swift_bic" class="form-control">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">IBAN <span class="text-muted small">(if applicable)</span></label>
+                  <input type="text" name="iban" class="form-control">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Routing Number <span class="text-muted small">(if applicable)</span></label>
+                  <input type="text" name="routing_number" class="form-control">
+                </div>
+              </div>
+
+              <div class="border rounded p-3 mb-3">
+                <p class="fw-semibold mb-2">Mobile Money <span class="text-muted small fw-normal">(where legitimately supported by your provider)</span></p>
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <label class="form-label small">Mobile Money Provider</label>
+                    <input type="text" name="mobile_money_provider" class="form-control" placeholder="e.g. M-Pesa">
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label small">Mobile Money Number</label>
+                    <input type="text" name="mobile_money_number" class="form-control">
+                  </div>
+                </div>
+              </div>
+
+              <div class="alert alert-light border small">
+                If your funding application is approved by the relevant funding provider, payment will be handled
+                according to that provider's official disbursement process. Bank details are collected only when
+                required for a legitimate funding or payment process. Your information is stored securely and
+                masked everywhere it is displayed.
+              </div>
+
+              <button type="submit" class="btn btn-primary fw-semibold">SAVE &amp; CONTINUE</button>
+            </form>
+
+            <script>
+              (function () {
+                var countrySelect = document.getElementById('bankCountry');
+                var bankSelect = document.getElementById('bankSelect');
+                var bankSearch = document.getElementById('bankSearch');
+                var notListed = document.getElementById('bankNotListed');
+                var manualBankName = document.getElementById('manualBankName');
+                var bankCodeField = document.getElementById('bankCodeField');
+                var swiftField = document.getElementById('swiftField');
+                var allBanks = [];
+
+                function renderBanks(banks) {
+                  bankSelect.innerHTML = '';
+                  if (!banks.length) {
+                    var opt = document.createElement('option');
+                    opt.value = '';
+                    opt.textContent = 'No banks listed yet for this country — use "My bank is not listed" below';
+                    bankSelect.appendChild(opt);
+                    return;
+                  }
+                  var placeholder = document.createElement('option');
+                  placeholder.value = '';
+                  placeholder.textContent = 'Select your bank…';
+                  bankSelect.appendChild(placeholder);
+                  banks.forEach(function (b) {
+                    var opt = document.createElement('option');
+                    opt.value = b.id;
+                    opt.textContent = b.bank_name + (b.bank_code ? ' (' + b.bank_code + ')' : '');
+                    bankSelect.appendChild(opt);
+                  });
+                }
+
+                function loadBanks(country) {
+                  bankSelect.disabled = true;
+                  bankSearch.disabled = true;
+                  fetch('/api/banks?country=' + encodeURIComponent(country))
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                      allBanks = data.banks || [];
+                      renderBanks(allBanks);
+                      bankSelect.disabled = false;
+                      bankSearch.disabled = false;
+                      bankCodeField.style.display = 'block';
+                      swiftField.style.display = 'block';
+                    })
+                    .catch(function () { renderBanks([]); });
+                }
+
+                countrySelect.addEventListener('change', function () {
+                  if (countrySelect.value) {
+                    loadBanks(countrySelect.value);
+                  } else {
+                    bankSelect.innerHTML = '<option value="">Select your country first…</option>';
+                    bankSelect.disabled = true;
+                    bankSearch.disabled = true;
+                  }
+                });
+
+                bankSearch.addEventListener('input', function () {
+                  var q = bankSearch.value.toLowerCase();
+                  var filtered = allBanks.filter(function (b) {
+                    return (b.bank_name || '').toLowerCase().indexOf(q) !== -1 ||
+                           (b.bank_code || '').toLowerCase().indexOf(q) !== -1 ||
+                           (b.swift_bic || '').toLowerCase().indexOf(q) !== -1;
+                  });
+                  renderBanks(filtered);
+                });
+
+                notListed.addEventListener('change', function () {
+                  if (notListed.checked) {
+                    bankSelect.disabled = true;
+                    bankSelect.value = '';
+                    manualBankName.style.display = 'block';
+                    manualBankName.required = true;
+                  } else {
+                    bankSelect.disabled = !countrySelect.value;
+                    manualBankName.style.display = 'none';
+                    manualBankName.required = false;
+                  }
+                });
+              })();
+            </script>
+          {% endif %}
+
+          <div class="d-flex justify-content-between mt-4">
+            {% if step_index > 0 %}
+              <a href="{{ url_for('application_step', step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">&larr; Back</a>
+            {% else %}
+              <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

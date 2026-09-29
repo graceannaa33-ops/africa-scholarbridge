@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Visa Submissions — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-file-earmark-check"></i> Visa Submissions</h2>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="alert alert-info small">
+    When a student has submitted all required information and their payment is verified, their
+    submission is automatically marked <strong>COMPLETE</strong> (<code>automatically_approved = TRUE</code>).
+    This is an Africa ScholarBridge <strong>internal submission completion only</strong> — it is
+    NOT an official U.S. government visa approval. The U.S. government makes the actual visa
+    decision separately, outside this platform.
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr><th>Student</th><th>Visa Reference</th><th>Payment</th><th>Submission</th><th>Processing Status</th><th>Submitted</th><th></th></tr></thead>
+      <tbody>
+      {% for s in submissions %}
+        <tr>
+          <td>{{ s.student_name }}</td>
+          <td>{{ s.request_number }}</td>
+          <td><span class="badge {{ 'bg-success' if s.payment_status == 'paid' else 'bg-secondary' }}">{{ s.payment_status|title }}</span></td>
+          <td>
+            <span class="badge {{ 'bg-success' if s.submission_status == 'complete' else 'bg-secondary' }}">{{ s.submission_status.replace('_',' ')|title }}</span>
+            {% if s.automatically_approved %}<span class="badge bg-info text-dark ms-1">Auto</span>{% endif %}
+          </td>
+          <td><span class="badge bg-info text-dark">{{ s.application_status.replace('_',' ')|title }}</span></td>
+          <td class="small text-muted">{{ s.application_submitted_at }}</td>
+          <td><a href="{{ url_for('visa_admin_request_detail', request_id=s.id) }}" class="btn btn-sm btn-outline-primary">Open</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="7" class="text-muted text-center py-3">No submissions yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Annual Funding Application — 🇺🇸 Visa Requirement — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+
+  <h2 class="fw-bold mb-1">Annual Funding Application</h2>
+  <p class="text-muted mb-4">Step {{ step_index + 1 }} of {{ steps|length }}</p>
+
+  <div class="progress mb-4" style="height: 8px;">
+    <div class="progress-bar bg-success" role="progressbar"
+         style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
+  </div>
+
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body p-4 p-md-5">
+
+          {% if application.visa_step_status == 'NOT_STARTED' %}
+            <h4 class="fw-bold mb-3">🇺🇸 U.S. Student Visa</h4>
+            <p class="mb-4">Do you already have the required U.S. student visa/application arrangements for your intended study?</p>
+            <form method="POST">
+              <div class="d-grid gap-3 col-md-8 mx-auto">
+                <button type="submit" name="visa_choice" value="yes" class="btn btn-outline-success btn-lg text-start px-4">
+                  <strong>YES — I HAVE MY VISA</strong>
+                  <div class="small text-muted">You'll upload a copy of your visa to complete this step.</div>
+                </button>
+                <button type="submit" name="visa_choice" value="no" class="btn btn-outline-primary btn-lg text-start px-4">
+                  <strong>NO — I NEED VISA ASSISTANCE</strong>
+                  <div class="small text-muted">Africa ScholarBridge helps with your visa application as part of your funding journey.</div>
+                </button>
+              </div>
+            </form>
+
+          {% elif application.visa_status == 'HAS_VISA' and application.visa_step_status == 'ACTION_REQUIRED' %}
+            <h4 class="fw-bold mb-3">📄 Upload Your U.S. Student Visa</h4>
+            <p class="mb-4">Please upload a clear copy of your U.S. student visa so Africa ScholarBridge can record it as part of your annual funding application.</p>
+
+            <form method="POST" action="{{ url_for('application_visa_document_upload') }}" enctype="multipart/form-data" id="visaUploadForm">
+              <div class="mb-3">
+                <label class="form-label fw-semibold">Visa document <span class="text-danger">*</span></label>
+                <input type="file" name="visa_document" id="visaDocumentInput" class="form-control"
+                       accept=".pdf,.jpg,.jpeg,.png" required>
+                <div class="form-text">
+                  Accepted formats: {{ allowed_visa_doc_extensions|join(', ')|upper }}. Maximum size: {{ max_visa_doc_mb }} MB.
+                </div>
+              </div>
+
+              <div id="visaDocumentPreview" class="mb-3" style="display:none;">
+                <label class="form-label fw-semibold small text-muted">Preview</label>
+                <div class="border rounded p-2 text-center bg-light">
+                  <img id="visaDocumentImagePreview" src="" alt="Visa document preview" style="max-height:260px; max-width:100%; display:none;">
+                  <div id="visaDocumentFileNamePreview" class="small text-muted"></div>
+                </div>
+              </div>
+
+              <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                  <label class="form-label">Visa type / category</label>
+                  <input type="text" name="visa_type_category" class="form-control" placeholder="e.g. F-1, J-1">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Passport number</label>
+                  <input type="text" name="passport_number" class="form-control" placeholder="Optional but recommended">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Visa issue date <span class="text-muted small">(if available)</span></label>
+                  <input type="date" name="visa_issue_date" class="form-control">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Visa expiry date <span class="text-muted small">(if applicable)</span></label>
+                  <input type="date" name="visa_expiry_date" class="form-control">
+                </div>
+                <div class="col-12">
+                  <label class="form-label">Additional information <span class="text-muted small">(optional)</span></label>
+                  <textarea name="additional_info" class="form-control" rows="2" placeholder="Anything else Africa ScholarBridge should know"></textarea>
+                </div>
+              </div>
+
+              <div class="alert alert-light border small">
+                Your visa document is stored securely and can only be viewed by you and authorized Africa
+                ScholarBridge staff. It is never made available at a public link.
+              </div>
+
+              <button type="submit" class="btn btn-primary fw-semibold">UPLOAD &amp; CONTINUE</button>
+            </form>
+
+            <script>
+              (function () {
+                var input = document.getElementById('visaDocumentInput');
+                var previewBox = document.getElementById('visaDocumentPreview');
+                var imgPreview = document.getElementById('visaDocumentImagePreview');
+                var namePreview = document.getElementById('visaDocumentFileNamePreview');
+                if (!input) return;
+                input.addEventListener('change', function () {
+                  var file = input.files && input.files[0];
+                  if (!file) { previewBox.style.display = 'none'; return; }
+                  previewBox.style.display = 'block';
+                  namePreview.textContent = file.name + ' (' + Math.round(file.size / 1024) + ' KB)';
+                  if (file.type && file.type.indexOf('image/') === 0) {
+                    var reader = new FileReader();
+                    reader.onload = function (e) {
+                      imgPreview.src = e.target.result;
+                      imgPreview.style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+                  } else {
+                    imgPreview.style.display = 'none';
+                    imgPreview.src = '';
+                  }
+                });
+              })();
+            </script>
+
+          {% elif application.visa_status == 'NEEDS_ASSISTANCE' and application.visa_step_status == 'ACTION_REQUIRED' %}
+            <h4 class="fw-bold mb-3 text-warning">⚠ Action Required</h4>
+            <p>You told us you need Africa ScholarBridge's U.S. Student Visa Application Assistance. Complete your payment to continue your annual funding application.</p>
+            <div class="asb-fee-box asb-fee-service p-3 mb-3">
+              <div class="d-flex justify-content-between">
+                <span>Africa ScholarBridge Service</span>
+                <strong>{% if linked_visa_request %}{{ format_price(linked_visa_request) }}{% else %}US${{ student_fee }}{% endif %}</strong>
+              </div>
+            </div>
+            {% if linked_visa_request %}
+            <a href="{{ url_for('student_visa_payment', request_id=linked_visa_request.id) }}" class="btn btn-primary fw-semibold">Complete Visa Assistance &rarr;</a>
+            {% endif %}
+
+          {% elif application.visa_step_status == 'NOT_REQUIRED' %}
+            <h4 class="fw-bold mb-3 text-success">✓ Visa requirement completed</h4>
+            <p class="text-muted mb-4">You told us you already have your U.S. student visa arrangements in place - no further action needed here.</p>
+            <form method="POST">
+              <input type="hidden" name="action" value="continue">
+              <button type="submit" class="btn btn-primary fw-semibold">Continue Application &rarr;</button>
+            </form>
+
+          {% elif application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}
+            <h4 class="fw-bold mb-3 text-success">✅ Visa Document Uploaded</h4>
+            <p class="mb-2">Your U.S. student visa document has been successfully uploaded to your Africa ScholarBridge application.</p>
+            <p class="text-muted mb-4">You can now continue with your annual funding application.</p>
+            <a href="{{ url_for('application_visa_document_view') }}" target="_blank" class="btn btn-outline-secondary mb-3">View Document</a>
+            <form method="POST">
+              <input type="hidden" name="action" value="continue">
+              <button type="submit" class="btn btn-primary fw-semibold">CONTINUE APPLICATION &rarr;</button>
+            </form>
+
+          {% elif application.visa_step_status == 'COMPLETE' %}
+            <h4 class="fw-bold mb-3 text-success">✅ Visa Assistance Completed</h4>
+            <p class="mb-2">Your Africa ScholarBridge visa assistance payment has been successfully verified.</p>
+            <p class="text-muted mb-3">You can now continue with your annual funding application.</p>
+            {% if application.visa_reference %}
+            <p class="small text-muted mb-4">Visa Assistance Reference: <strong>{{ application.visa_reference }}</strong></p>
+            {% endif %}
+            <div class="alert alert-info small">
+              This confirms Africa ScholarBridge's own visa-assistance service is complete and paid for. It is
+              <strong>not</strong> a U.S. government visa approval, visa issuance, or guarantee of any kind - the
+              U.S. government makes the actual visa decision separately.
+            </div>
+            <form method="POST">
+              <input type="hidden" name="action" value="continue">
+              <button type="submit" class="btn btn-primary fw-semibold">CONTINUE APPLICATION &rarr;</button>
+            </form>
+          {% endif %}
+
+          <div class="d-flex justify-content-between mt-4">
+            {% if step_index > 0 %}
+              <a href="{{ url_for('application_step', step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">&larr; Back</a>
+            {% else %}
+              <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

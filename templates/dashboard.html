@@ -1,0 +1,277 @@
+{% extends "base.html" %}
+{% block title %}My Dashboard — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap mb-4">
+    <div>
+      <h2 class="fw-bold mb-0">Welcome, {{ logged_in_student.full_name }}</h2>
+      <p class="text-muted">Current Cycle: {{ cycle.name if cycle else 'No active cycle' }}</p>
+    </div>
+    {% if not application %}
+      <a href="{{ url_for('application_start') }}" class="btn btn-primary fw-semibold">Start My Annual Application</a>
+    {% elif application.status == 'Draft' %}
+      <a href="{{ url_for('application_step', step_name='personal') }}" class="btn btn-warning fw-semibold">Continue My Application</a>
+    {% endif %}
+  </div>
+
+  <div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+      <div class="card asb-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Application</p>
+        <h5 class="fw-bold mb-0">{{ application.reference_number if application and application.reference_number else 'Not Started' }}</h5>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card asb-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Status</p>
+        <h5 class="fw-bold mb-0">{{ application.status if application else '—' }}</h5>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card asb-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Funding Matches</p>
+        <h5 class="fw-bold mb-0">{{ matches_count }} Match{{ 'es' if matches_count != 1 else '' }}</h5>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="card asb-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Documents</p>
+        <h5 class="fw-bold mb-0">{{ docs_progress[0] }}/{{ docs_progress[1] }} Complete</h5>
+      </div></div>
+    </div>
+  </div>
+
+  {% if application and application.status == 'Draft' %}
+  <div class="card asb-card mb-4">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">Annual Funding Application Progress</h5>
+      <ul class="list-group list-group-flush mb-3">
+        {% for f, label in [('full_name','Personal Information'), ('institution','Education'),
+                             ('funding_type_needed','Funding Information')] %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          {{ label }}
+          {% if application[f] %}<span class="text-success fw-bold">✓</span>{% else %}<span class="text-muted">○</span>{% endif %}
+        </li>
+        {% endfor %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          🇺🇸 Visa Requirement
+          {% if application.visa_step_status == 'COMPLETE' %}
+            <span class="badge bg-success">✓ COMPLETE</span>
+          {% elif application.visa_step_status == 'NOT_REQUIRED' %}
+            <span class="badge bg-success">✓ Not Required</span>
+          {% elif application.visa_step_status == 'ACTION_REQUIRED' %}
+            <span class="badge bg-warning text-dark">⚠ Action Required</span>
+          {% else %}
+            <span class="text-muted">○</span>
+          {% endif %}
+        </li>
+        {% for f, label in [('personal_statement','Personal Statement')] %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          {{ label }}
+          {% if application[f] %}<span class="text-success fw-bold">✓</span>{% else %}<span class="text-muted">○</span>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+
+      {% if application.visa_step_status == 'ACTION_REQUIRED' and application.visa_status == 'HAS_VISA' %}
+        <div class="alert alert-warning small d-flex justify-content-between align-items-center flex-wrap gap-2 mb-0">
+          <span>📄 Please upload your U.S. student visa document</span>
+          <a href="{{ url_for('application_step', step_name='visa') }}" class="btn btn-sm btn-warning fw-semibold">Upload Visa</a>
+        </div>
+      {% elif application.visa_step_status == 'ACTION_REQUIRED' %}
+        <div class="alert alert-warning small d-flex justify-content-between align-items-center flex-wrap gap-2 mb-0">
+          <span>🇺🇸 Visa Assistance — Payment: {{ format_price(visa_request) if visa_request else 'KSh 1,500' }}</span>
+          <a href="{{ url_for('application_step', step_name='visa') }}" class="btn btn-sm btn-warning fw-semibold">Complete Visa Assistance</a>
+        </div>
+      {% elif application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}
+        <div class="alert alert-success small mb-0">🇺🇸 Visa Document Uploaded ✓ COMPLETE</div>
+      {% elif application.visa_step_status == 'COMPLETE' %}
+        <div class="alert alert-success small mb-0">🇺🇸 Visa Assistance ✓ COMPLETE — Payment Verified ✓</div>
+      {% endif %}
+
+      <a href="{{ url_for('application_step', step_name='personal') }}" class="btn btn-sm btn-outline-primary mt-3">Continue Application &rarr;</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if application and (application.visa_document_status == 'UPLOADED' or (application.visa_status == 'NEEDS_ASSISTANCE' and application.visa_payment_status == 'PAID')) %}
+  <div class="card asb-card mb-4 border-success">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">🇺🇸 VISA STATUS</h5>
+      {% if application.visa_document_status == 'UPLOADED' %}
+        <p class="mb-1 text-success fw-semibold">✓ Visa Document Uploaded</p>
+        <p class="text-muted mb-3">Status: Complete</p>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('application_visa_document_view') }}" target="_blank" class="btn btn-sm btn-outline-secondary">VIEW DOCUMENT</a>
+          <a href="{{ url_for('application_step', step_name='visa') }}" class="btn btn-sm btn-primary fw-semibold">CONTINUE APPLICATION</a>
+        </div>
+      {% else %}
+        <p class="mb-1 text-success fw-semibold">✓ Visa Assistance Paid</p>
+        <p class="text-muted mb-1">Payment: {{ format_price(visa_request) if visa_request else 'KSh 1,500' }}</p>
+        <p class="text-muted mb-3">Status: Complete</p>
+        <div class="d-flex gap-2 flex-wrap">
+          <a href="{{ url_for('application_step', step_name='visa') }}" class="btn btn-sm btn-primary fw-semibold">CONTINUE APPLICATION</a>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if disbursement %}
+  <div class="card asb-card mb-4">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">💰 Funding Payment Status</h5>
+      <table class="table table-sm mb-3">
+        <tr><th>Funding Application</th><td>✓ {{ application.status }}</td></tr>
+        <tr><th>Funding Provider</th><td>{{ disbursement.opportunity_title or '—' }}</td></tr>
+        <tr><th>Payment Information</th>
+          <td>{% if bank_details %}✓ Submitted{% elif disbursement.payment_status == 'NOT_REQUIRED' %}Not Required{% else %}Not Submitted{% endif %}</td></tr>
+        <tr><th>Payment Status</th>
+          <td>
+            <span class="badge {{ 'bg-success' if disbursement.payment_status == 'PAID' else 'bg-danger' if disbursement.payment_status == 'FAILED' else 'bg-secondary' if disbursement.payment_status == 'NOT_REQUIRED' else 'bg-warning text-dark' }}">
+              {{ disbursement.payment_status.replace('_', ' ') }}
+            </span>
+          </td>
+        </tr>
+      </table>
+      <div class="alert alert-info small mb-0">
+        If your funding application is approved by the relevant funding provider, payment will be handled according
+        to that provider's official disbursement process.
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if application %}
+  <div class="card asb-card mb-4">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">🏦 My Funding Payment Information</h5>
+      {% if bank_details %}
+        <table class="table table-sm mb-3">
+          <tr><th>Country</th><td>{{ bank_details.country }}</td></tr>
+          <tr><th>Bank</th><td>{{ bank_details.bank_name }}</td></tr>
+          <tr><th>Account</th><td>{{ masked_account }}</td></tr>
+          <tr><th>Status</th><td><span class="badge bg-success">✓ Information Submitted</span></td></tr>
+        </table>
+        <div class="d-flex gap-2">
+          <a href="{{ url_for('application_step', step_name='bank') }}" class="btn btn-sm btn-outline-secondary">EDIT PAYMENT INFORMATION</a>
+          <form method="POST" action="{{ url_for('application_bank_details_remove') }}" onsubmit="return confirm('Remove your saved payment information?');">
+            <button type="submit" class="btn btn-sm btn-outline-danger">REMOVE PAYMENT INFORMATION</button>
+          </form>
+        </div>
+      {% else %}
+        <p class="text-muted mb-0">
+          {% if application.bank_step_status == 'NOT_REQUIRED' %}
+            None of your current funding matches require bank/payout information.
+          {% else %}
+            You haven't submitted funding payment information yet. This is only ever needed if a funding provider requires it.
+          {% endif %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Application Timeline</h5>
+          {% if application %}
+          <div class="asb-timeline-mini d-flex flex-wrap gap-2">
+            {% for step in tracker_steps %}
+            <span class="badge {{ 'bg-success' if loop.index0 < 3 else 'bg-secondary' }} p-2">{{ step }}</span>
+            {% endfor %}
+          </div>
+          <a href="{{ url_for('tracker') }}" class="btn btn-sm btn-outline-primary mt-3">View Full Tracker</a>
+          {% else %}
+          <p class="text-muted mb-0">Start your annual application to see your progress timeline here.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Recent Activity</h5>
+          {% if history %}
+          <ul class="list-group list-group-flush">
+            {% for h in history %}
+            <li class="list-group-item d-flex justify-content-between">
+              <span>{{ h.status }}{% if h.note %} — <span class="text-muted">{{ h.note }}</span>{% endif %}</span>
+              <span class="text-muted small">{{ h.created_at }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted mb-0">No activity yet.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3"><i class="bi bi-bell"></i> Notifications</h5>
+          {% if notifications %}
+          <ul class="list-group list-group-flush">
+            {% for n in notifications %}
+            <li class="list-group-item {{ 'fw-semibold' if not n.is_read else '' }}">
+              {{ n.message }}
+              <div class="small text-muted">{{ n.created_at }}</div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted mb-0">No notifications yet.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3"><i class="bi bi-clock-history"></i> Upcoming Deadlines</h5>
+          {% if upcoming %}
+          <ul class="list-group list-group-flush">
+            {% for o in upcoming %}
+            <li class="list-group-item">
+              <a href="{{ url_for('opportunity_detail', opp_id=o.id) }}">{{ o.title }}</a>
+              <div class="small text-muted">Closes {{ o.close_date or 'TBA' }}</div>
+            </li>
+            {% endfor %}
+          </ul>
+          {% else %}
+          <p class="text-muted mb-0">No upcoming deadlines.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-6 col-md-3"><a href="{{ url_for('matches') }}" class="btn btn-outline-primary w-100">Funding Matches</a></div>
+    <div class="col-6 col-md-3"><a href="{{ url_for('tracker') }}" class="btn btn-outline-primary w-100">Application Tracker</a></div>
+    <div class="col-6 col-md-3"><a href="{{ url_for('documents') }}" class="btn btn-outline-primary w-100">Documents</a></div>
+    <div class="col-6 col-md-3"><a href="{{ url_for('opportunities') }}" class="btn btn-outline-primary w-100">Explore Funding</a></div>
+  </div>
+
+  {% if visa_request or has_us_match %}
+  <div class="asb-visa-promo mt-4 p-4 rounded">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+      <div>
+        <h5 class="fw-bold mb-1">🇺🇸 U.S. Student Visa Assistance</h5>
+        {% if visa_request %}
+          <p class="mb-1">Reference {{ visa_request.request_number }} — Status: <strong>{{ visa_request.application_status.replace('_',' ')|title }}</strong></p>
+          {% if visa_tracker %}<p class="small text-muted mb-0">{{ visa_tracker.week_label }} — Day {{ visa_tracker.current_day }} of {{ visa_tracker.total_days }}</p>{% endif %}
+        {% else %}
+          <p class="mb-0">Preparing to study in the United States? Pay only US$11.59 (KSh 1,500) — Africa ScholarBridge covers the applicable US$185 visa application fee for eligible students. ⏱️ Up to 2 weeks.</p>
+        {% endif %}
+      </div>
+      <a href="{{ url_for('student_visa_dashboard') if visa_request else url_for('student_visa_landing') }}" class="btn btn-warning fw-semibold">
+        {{ 'View My Visa Request' if visa_request else 'Get Visa Assistance' }} →
+      </a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

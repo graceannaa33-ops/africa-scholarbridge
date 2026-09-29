@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Submit Application — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-7 text-center">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body p-5">
+          <i class="bi bi-send-check display-3 text-primary"></i>
+          <h3 class="fw-bold mt-3">Ready to Submit Your Application?</h3>
+          <p class="text-muted">Once submitted, your annual application reference number will be generated and you will be matched against open funding opportunities. You will not be able to edit this application after submission.</p>
+          <form method="POST">
+            <button type="submit" class="btn btn-primary btn-lg fw-semibold mt-2">Submit My Application</button>
+          </form>
+          <a href="{{ url_for('application_step', step_name='review') }}" class="d-block mt-3">&larr; Back to Review</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}My Visa Dashboard — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">🇺🇸 My Visa Assistance Dashboard</h2>
+
+  {% if not visa_request %}
+    <div class="alert alert-info mt-3">
+      You haven't started a visa assistance request yet.
+      <a href="{{ url_for('student_visa_landing') }}">Get Visa Assistance</a>.
+    </div>
+  {% else %}
+    <p class="text-muted mb-4">Reference: <strong>{{ visa_request.request_number }}</strong></p>
+
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3">
+        <div class="card asb-stat-card h-100"><div class="card-body">
+          <p class="text-muted small mb-1">Payment</p>
+          <h5 class="fw-bold mb-0">{{ visa_request.payment_status.replace('_', ' ')|title }}</h5>
+        </div></div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card asb-stat-card h-100"><div class="card-body">
+          <p class="text-muted small mb-1">Application Status</p>
+          <h5 class="fw-bold mb-0">{{ visa_request.application_status.replace('_', ' ')|title }}</h5>
+        </div></div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card asb-stat-card h-100"><div class="card-body">
+          <p class="text-muted small mb-1">Application Progress</p>
+          <h5 class="fw-bold mb-0">{{ visa_request.current_step }}/7 Steps</h5>
+        </div></div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="card asb-stat-card h-100"><div class="card-body">
+          <p class="text-muted small mb-1">Visa Category</p>
+          <h5 class="fw-bold mb-0">{{ visa_request.visa_category or '—' }}</h5>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="card asb-card shadow-sm mb-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold mb-3">🇺🇸 U.S. Student Visa Application</h5>
+        <div class="row g-3">
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Africa ScholarBridge Service Fee</p>
+            <p class="fw-bold mb-0">{{ visa_request.currency_symbol if visa_request.currency_symbol else visa_request.currency }} {{ visa_request.service_price|int if visa_request.service_price == visa_request.service_price|int else visa_request.service_price }}</p>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Payment Status</p>
+            <p class="fw-bold mb-0">{{ '✓ PAID' if visa_request.payment_status == 'paid' else visa_request.payment_status.replace('_',' ')|title }}</p>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">U.S. Visa Application Fee</p>
+            <p class="fw-bold mb-0">US${{ us_gov_fee }}</p>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Covered By</p>
+            <p class="fw-bold mb-0">✓ Africa ScholarBridge</p>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Coverage Status</p>
+            <p class="fw-bold mb-0">
+              {% if visa_request.visa_fee_coverage_status in ('PAID_BY_AFRICA_SCHOLARBRIDGE', 'CONFIRMED') %}✓ COVERED
+              {% elif visa_request.visa_fee_coverage_status == 'PROCESSING' %}⏳ PROCESSING
+              {% elif visa_request.visa_fee_coverage_status == 'ELIGIBLE' %}✓ ELIGIBLE
+              {% else %}PENDING{% endif %}
+            </p>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Application Status</p>
+            <p class="fw-bold mb-0">{{ visa_request.application_status.replace('_',' ')|title }}</p>
+          </div>
+          <div class="col-6 col-md-3">
+            <p class="text-muted small mb-1">Processing Time</p>
+            <p class="fw-bold mb-0">Up to 2 weeks</p>
+          </div>
+        </div>
+        <p class="small text-muted mt-3 mb-0">Africa ScholarBridge covering the U.S. visa application fee does not guarantee visa approval or issuance — visa eligibility and final decisions remain with the appropriate U.S. government authorities.</p>
+      </div>
+    </div>
+
+    {% if visa_request.payment_status != 'paid' %}
+      <div class="asb-locked-banner p-4 mb-4">
+        <h5 class="fw-bold">🔒 Application Locked</h5>
+        {% if visa_request.payment_status == 'pending_verification' %}
+        <p class="mb-2">Your payment details have been submitted and are awaiting verification. Your visa application unlocks once an administrator verifies the payment.</p>
+        <a href="{{ url_for('student_visa_payment', request_id=visa_request.id) }}" class="btn btn-primary">View Payment Status</a>
+        {% else %}
+        <p class="mb-2">Complete payment to unlock your visa application.</p>
+        <a href="{{ url_for('student_visa_payment', request_id=visa_request.id) }}" class="btn btn-primary">Go to Payment</a>
+        {% endif %}
+      </div>
+    {% elif visa_request.application_status in ('application_unlocked', 'information_required') %}
+      <div class="card asb-card shadow-sm mb-4">
+        <div class="card-body p-4 d-flex justify-content-between align-items-center flex-wrap">
+          <div>
+            <h5 class="fw-bold mb-1">Continue Your Visa Application</h5>
+            <p class="text-muted mb-0">You're on step {{ visa_request.current_step }} of 7.</p>
+            {% if visa_request.application_status == 'information_required' and visa_request.required_info_note %}
+              <p class="small text-danger mt-2 mb-0">⏸️ Processing Paused — Information Required: {{ visa_request.required_info_note }}</p>
+            {% endif %}
+          </div>
+          <a href="{{ url_for('student_visa_application', request_id=visa_request.id) }}" class="btn btn-warning fw-semibold">Continue Application →</a>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if tracker %}
+      <div class="card asb-card shadow-sm mb-4">
+        <div class="card-body p-4">
+          <h5 class="fw-bold mb-1">{{ tracker.stage_label }}</h5>
+          <p class="small text-muted mb-2">{{ tracker.week_label }}</p>
+          <p class="mb-2">Day {{ tracker.current_day }} of {{ tracker.total_days }} &nbsp;·&nbsp; {{ tracker.days_remaining }} days remaining</p>
+          <div class="asb-visa-tracker-bar mb-2">
+            <div class="asb-visa-tracker-fill" style="width: {{ tracker.percent }}%;"></div>
+          </div>
+          <p class="small text-muted mb-0">Estimated Completion: {{ tracker.estimated_completion.strftime('%B %-d, %Y') }}</p>
+          {% if visa_request.application_status == 'completed' %}
+            <p class="fw-bold text-success mt-2 mb-0">✅ Africa ScholarBridge Assistance Completed</p>
+          {% endif %}
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="row g-4">
+      <div class="col-md-6">
+        <div class="card asb-card h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">Documents</h6>
+            {% set uploaded = documents|selectattr('status', 'ne', 'Missing')|list|length %}
+            <p class="small text-muted">{{ uploaded }}/{{ documents|length }} complete</p>
+            <a href="{{ url_for('student_visa_documents') }}" class="btn btn-sm btn-outline-primary">Manage Documents</a>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card asb-card h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">Messages</h6>
+            {% if notes %}
+              <ul class="list-unstyled small mb-0">
+                {% for n in notes[:3] %}
+                <li class="mb-1">💬 {{ n.note }}</li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p class="small text-muted mb-0">No messages yet.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card asb-card h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">Interview Preparation</h6>
+            <a href="{{ url_for('student_visa_interview') }}" class="btn btn-sm btn-outline-primary">Practice Questions</a>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card asb-card h-100">
+          <div class="card-body">
+            <h6 class="fw-bold">Official U.S. Resources</h6>
+            <a href="{{ url_for('student_visa_resources') }}" class="btn btn-sm btn-outline-primary">View Resources</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

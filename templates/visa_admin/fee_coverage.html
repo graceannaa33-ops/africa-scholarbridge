@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Fee Coverage — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-cash-stack"></i> 🇺🇸 U.S. Visa Fee Coverage</h2>
+    <p class="mb-0 text-muted">Student Service Payment: US$11.59 / KSh 1,500 &nbsp;→&nbsp; Visa Application Fee Covered: US${{ us_gov_fee }}</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="row g-3 my-2">
+    <div class="col-6 col-md-3">
+      <div class="card asb-visa-stat-card accent-red h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Total Covered (US$)</p><h4 class="fw-bold mb-0">${{ '%.2f' % total_covered }}</h4>
+      </div></div>
+    </div>
+    {% for row in by_status %}
+    <div class="col-6 col-md-3">
+      <div class="card asb-visa-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">{{ fee_coverage_labels.get(row.visa_fee_coverage_status, row.visa_fee_coverage_status) }}</p>
+        <h4 class="fw-bold mb-0">{{ row.c }}</h4>
+      </div></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr>
+        <th>Student</th><th>Visa Reference</th><th>Coverage Status</th><th>Payment Date</th>
+        <th>Payment Reference</th><th>Receipt</th><th>Notes</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.student_name }}</td>
+          <td>{{ r.request_number }}</td>
+          <td><span class="badge bg-info text-dark">{{ fee_coverage_labels.get(r.visa_fee_coverage_status, r.visa_fee_coverage_status) }}</span></td>
+          <td class="small text-muted">{{ r.visa_fee_payment_date or '—' }}</td>
+          <td class="small">{{ r.visa_fee_payment_reference or '—' }}</td>
+          <td class="small">{{ r.visa_fee_receipt_path or '—' }}</td>
+          <td class="small">{{ r.visa_fee_notes or '—' }}</td>
+          <td><a href="{{ url_for('visa_admin_request_detail', request_id=r.id) }}" class="btn btn-sm btn-outline-primary">Manage</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="text-muted text-center py-3">No paid requests yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

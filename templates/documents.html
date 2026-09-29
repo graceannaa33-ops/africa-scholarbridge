@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Documents — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">Document Checklist</h2>
+  <p class="text-muted mb-4">Application: <strong>{{ application.reference_number or 'Draft' }}</strong></p>
+
+  <div class="card asb-card shadow-sm">
+    <div class="card-body">
+      <table class="table align-middle">
+        <thead><tr><th>Document</th><th>Type</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+        {% for d in documents %}
+          <tr>
+            <td>{{ d.document_type }}</td>
+            <td>{% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}</td>
+            <td>
+              <span class="badge {{ 'bg-success' if d.status == 'Verified' else 'bg-primary' if d.status == 'Uploaded' else 'bg-warning text-dark' }}">{{ d.status }}</span>
+            </td>
+            <td>
+              {% if d.status == 'Missing' %}
+              <form method="POST">
+                <input type="hidden" name="document_id" value="{{ d.id }}">
+                <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-upload"></i> Upload</button>
+              </form>
+              {% else %}
+              <span class="text-muted small">{{ d.uploaded_at }}</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="small text-muted mb-0">Note: this demo simulates uploads without storing real files. In production, uploads would be securely stored and scanned before review.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}

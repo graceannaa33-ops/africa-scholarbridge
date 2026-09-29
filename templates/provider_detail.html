@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ org.name }} — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <nav class="mb-3 small"><a href="{{ url_for('providers') }}">&larr; Back to Providers</a></nav>
+  <div class="d-flex align-items-center mb-3">
+    <div class="asb-org-initial me-3" style="width:64px;height:64px;font-size:1.5rem;">{{ org.logo_initial or org.name[0] }}</div>
+    <div>
+      <h2 class="fw-bold mb-0">{{ org.name }}</h2>
+      <span class="badge bg-secondary">{{ org.org_type }}</span>
+      <span class="badge {{ 'bg-success' if org.verification_status == 'Verified' else 'bg-warning text-dark' }}">{{ org.verification_status }}</span>
+    </div>
+  </div>
+  <p>{{ org.description or 'No description available.' }}</p>
+  {% if org.website_url %}<p><a href="{{ org.website_url }}" target="_blank" rel="noopener">{{ org.website_url }} <i class="bi bi-box-arrow-up-right"></i></a></p>{% endif %}
+
+  <h5 class="fw-bold mt-4">Programs</h5>
+  {% if programs %}
+  <ul>
+    {% for p in programs %}<li>{{ p.name }} {% if p.description %}— <span class="text-muted small">{{ p.description }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+  {% else %}<p class="text-muted">No programs listed yet.</p>{% endif %}
+
+  <h5 class="fw-bold mt-4">Funding Opportunities</h5>
+  <div class="row g-3">
+    {% for opp in opportunities %}
+    <div class="col-md-6">
+      <div class="card asb-card h-100">
+        <div class="card-body">
+          <span class="badge asb-badge-type mb-2">{{ opp.funding_type }}</span>
+          <h6 class="fw-semibold">{{ opp.title }}</h6>
+          <p class="small text-muted">Closes {{ opp.close_date or 'TBA' }}</p>
+          <a href="{{ url_for('opportunity_detail', opp_id=opp.id) }}" class="btn btn-sm btn-outline-primary">View Details</a>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No opportunities listed for this organization yet.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

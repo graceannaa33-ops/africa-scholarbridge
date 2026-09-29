@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Scam Alerts — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1"><i class="bi bi-shield-exclamation text-danger"></i> Scam Alerts</h2>
+  <p class="text-muted mb-4">Protect yourself from fraudulent scholarship and funding schemes.</p>
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card asb-card shadow-sm mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold">Common Warning Signs</h5>
+          <ul>
+            <li><strong>Fake application fees</strong> — legitimate scholarships never require payment to apply.</li>
+            <li><strong>Fake acceptance letters</strong> — always verify directly with the provider's official contacts.</li>
+            <li><strong>Fake agents</strong> — be wary of individuals claiming to guarantee funding for a fee.</li>
+            <li><strong>Fake social media accounts</strong> — check for official verification badges and cross-reference with the organization's real website.</li>
+            <li><strong>Suspicious payment requests</strong> — never send money via wire transfer, gift cards, or cryptocurrency for "processing."</li>
+            <li><strong>Fake websites</strong> — check the URL carefully for misspellings or unusual domains.</li>
+          </ul>
+          <h5 class="fw-bold mt-4">How to Verify a Provider</h5>
+          <p>Cross-check the organization on Africa ScholarBridge's Providers directory, visit their official website directly (not through a link sent to you), and look for a verification badge on the opportunity page.</p>
+          <h5 class="fw-bold mt-4">How to Verify an Official Application Link</h5>
+          <p>Compare the link on Africa ScholarBridge with the provider's own website. If in doubt, search for the opportunity name plus the organization's name directly.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body">
+          <h5 class="fw-bold">Report a Suspicious Opportunity</h5>
+          <form method="POST">
+            <div class="mb-3"><label class="form-label">Your Name (optional)</label><input type="text" name="reporter_name" class="form-control"></div>
+            <div class="mb-3"><label class="form-label">Your Email (optional)</label><input type="email" name="reporter_email" class="form-control"></div>
+            <div class="mb-3"><label class="form-label">Opportunity / Organization Name</label><input type="text" name="opportunity_name" class="form-control"></div>
+            <div class="mb-3"><label class="form-label">Describe What Happened</label><textarea name="description" class="form-control" rows="4" required></textarea></div>
+            <button type="submit" class="btn btn-danger w-100 fw-semibold">Submit Report</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

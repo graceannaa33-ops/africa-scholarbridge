@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}Visa Application Payment — Africa ScholarBridge{% endblock %}
+{% block content %}
+{% set fee_display = "{:,.0f}".format(visa_fee) %}
+{% set status = payment.payment_status if payment else None %}
+{% set continue_url = url_for('application_step', step_name='visa') if visa_request.annual_application_id else url_for('student_visa_application', request_id=visa_request.id) %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body p-3 p-md-5">
+          <p class="text-uppercase small fw-semibold text-muted mb-1">Visa Application Payment</p>
+          <h2 class="fw-bold mb-1">Visa Application Assistance Fee</h2>
+          <p class="text-muted mb-4">Reference: <strong>{{ visa_request.request_number }}</strong></p>
+
+          {# ---------------- Payment status ---------------- #}
+          {% if unlocked %}
+            <div class="alert alert-success" role="status">
+              <h5 class="fw-bold mb-1">✅ Payment Verified</h5>
+              <p class="mb-3">Payment verified successfully. You can now continue with your visa application.</p>
+              <a href="{{ continue_url }}" class="btn btn-success fw-semibold">Continue to Visa Application &rarr;</a>
+            </div>
+          {% elif status == 'PAYMENT_PENDING' %}
+            <div class="alert alert-warning" role="status">
+              <h5 class="fw-bold mb-1">⏳ Payment Status: Pending Verification</h5>
+              <p class="mb-1">Your payment details have been submitted and are awaiting verification.</p>
+              <p class="small mb-0">Your visa application stays locked until an Africa ScholarBridge administrator confirms the payment on the receiving M-PESA account.</p>
+            </div>
+          {% elif status == 'PAYMENT_REJECTED' %}
+            <div class="alert alert-danger" role="status">
+              <h5 class="fw-bold mb-1">❌ Payment Not Verified</h5>
+              <p class="mb-1">Your payment could not be verified. Please check your payment details or contact support.</p>
+              {% if payment.rejection_reason %}<p class="small mb-0"><strong>Reason:</strong> {{ payment.rejection_reason }}</p>{% endif %}
+            </div>
+          {% endif %}
+
+          {% if not unlocked %}
+          {# ---------------- 1. Fee + number ---------------- #}
+          <section class="mb-4">
+            <div class="border rounded p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <span class="fw-semibold">Visa Application Assistance Fee</span>
+              <strong class="fs-3">KSh {{ fee_display }}</strong>
+            </div>
+            <div class="border border-success rounded p-3 bg-light text-center">
+              <p class="mb-1 fw-semibold">Pay via M-PESA. Send exactly:</p>
+              <div class="fs-3 fw-bold">KSh {{ fee_display }}</div>
+              <p class="mb-1 mt-2">To M-PESA Number:</p>
+              <div class="fs-2 fw-bold font-monospace" id="mpesaNumber">{{ mpesa_receiving_number }}</div>
+            </div>
+          </section>
+
+          <section class="mb-4">
+            <h5 class="fw-bold">How to pay</h5>
+            <ol class="mb-0">
+              <li>Open M-PESA and choose <strong>Send Money</strong>.</li>
+              <li>Enter <strong>{{ mpesa_receiving_number }}</strong> and send exactly <strong>KSh {{ fee_display }}</strong>.</li>
+              <li>Wait for the M-PESA confirmation SMS.</li>
+              <li>Paste that SMS below (and/or upload a screenshot of it), then submit for verification.</li>
+            </ol>
+          </section>
+
+          {% if status == 'PAYMENT_PENDING' %}
+          <details class="mb-3">
+            <summary class="fw-semibold">Need to correct your submission?</summary>
+            <p class="small text-muted mt-2">Paste the original M-PESA SMS again. Details are always read from the message itself — they can't be typed in by hand.</p>
+          {% endif %}
+
+          {# ---------------- 2. Submission form ---------------- #}
+          <form method="POST" action="{{ url_for('student_visa_payment_submit', request_id=visa_request.id) }}"
+                enctype="multipart/form-data" id="mpesaForm"
+                data-parse-url="{{ url_for('student_visa_payment_parse', request_id=visa_request.id) }}">
+            <section class="mb-4">
+              <h5 class="fw-bold mb-2">M-PESA Confirmation Message</h5>
+              <label for="mpesaMessage" class="form-label">Paste your M-PESA confirmation message here</label>
+              <textarea id="mpesaMessage" name="mpesa_message" class="form-control font-monospace" rows="5"
+                        maxlength="{{ max_message_length }}"
+                        placeholder="Paste your M-PESA confirmation SMS here..."></textarea>
+              <div class="form-text">Paste the full message you received after sending the money — it starts with a 10-character code such as <code>UIR1N8OV43 Confirmed.</code></div>
+            </section>
+
+            <section class="mb-4">
+              <h5 class="fw-bold mb-2">Upload Screenshot <span class="text-muted fw-normal small">(optional if you pasted the SMS)</span></h5>
+              <input type="file" name="payment_proof" id="paymentProof" class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">
+              <div class="form-text">JPG, PNG or WEBP, up to {{ max_proof_mb }} MB.</div>
+              <img id="proofPreview" alt="Screenshot preview" class="img-fluid rounded border mt-2 d-none" style="max-height: 280px;">
+              <div id="manualCodeBox" class="mt-3 d-none">
+                <label for="manualCode" class="form-label">M-PESA transaction code shown on your screenshot <span class="text-danger">*</span></label>
+                <input type="text" id="manualCode" name="transaction_reference" class="form-control text-uppercase font-monospace" maxlength="10" placeholder="e.g. UIR1N8OV43" autocomplete="off">
+                <div class="form-text">Only needed when you upload a screenshot without pasting the SMS.</div>
+              </div>
+            </section>
+
+            {# ---------------- 3. Detected details (server-parsed preview) ---------------- #}
+            <section class="mb-4">
+              <h5 class="fw-bold mb-2">Detected Payment Details</h5>
+              <div class="border rounded p-3 bg-light">
+                <dl class="row mb-0 small" id="detected">
+                  <dt class="col-5 col-sm-4">Transaction Code</dt><dd class="col-7 col-sm-8 font-monospace" data-field="transaction_code">—</dd>
+                  <dt class="col-5 col-sm-4">Amount</dt><dd class="col-7 col-sm-8" data-field="amount">—</dd>
+                  <dt class="col-5 col-sm-4">Recipient</dt><dd class="col-7 col-sm-8" data-field="counterparty_name">—</dd>
+                  <dt class="col-5 col-sm-4">Phone</dt><dd class="col-7 col-sm-8" data-field="counterparty_phone">—</dd>
+                  <dt class="col-5 col-sm-4">Date</dt><dd class="col-7 col-sm-8" data-field="date">—</dd>
+                  <dt class="col-5 col-sm-4">Time</dt><dd class="col-7 col-sm-8" data-field="time">—</dd>
+                </dl>
+                <ul class="list-unstyled small mb-0 mt-2" id="detectedFlags"></ul>
+              </div>
+              <p class="form-text mb-0">These details are read automatically from your message. They are sent for verification only — they are not proof of payment.</p>
+            </section>
+
+            <section class="mb-4">
+              <label for="payerPhone" class="form-label">Phone number you paid from <span class="text-muted small">(optional — helps us find your payment)</span></label>
+              <input type="tel" id="payerPhone" name="payment_phone" class="form-control" maxlength="20" placeholder="07XXXXXXXX">
+              <label for="comment" class="form-label mt-3">Additional comment <span class="text-muted small">(optional)</span></label>
+              <textarea id="comment" name="additional_comment" class="form-control" rows="2" maxlength="500"></textarea>
+            </section>
+
+            <section class="mb-3">
+              <h5 class="fw-bold mb-1">Payment Status</h5>
+              <p class="mb-3"><span class="badge {{ 'bg-warning text-dark' if status == 'PAYMENT_PENDING' else 'bg-danger' if status == 'PAYMENT_REJECTED' else 'bg-secondary' }}">
+                {{ status_labels.get(status, 'Not submitted yet') }}</span></p>
+              <button type="submit" class="btn btn-primary btn-lg fw-semibold w-100">Submit Payment for Verification</button>
+            </section>
+          </form>
+          {% if status == 'PAYMENT_PENDING' %}</details>{% endif %}
+
+          {% if payment and status == 'PAYMENT_PENDING' %}
+          <section class="mb-4">
+            <h6 class="fw-bold">What you submitted</h6>
+            <table class="table table-sm small mb-0">
+              <tr><th>Transaction Code</th><td class="font-monospace">{{ payment.mpesa_transaction_code or payment.transaction_reference or '—' }}</td></tr>
+              <tr><th>Amount</th><td>{{ 'KSh {:,.2f}'.format(payment.submitted_amount) if payment.submitted_amount is not none else '—' }}</td></tr>
+              <tr><th>Recipient</th><td>{{ payment.extracted_recipient_name or '—' }}</td></tr>
+              <tr><th>Phone</th><td>{{ payment.extracted_recipient_phone or '—' }}</td></tr>
+              <tr><th>Date / Time</th><td>{{ payment.extracted_transaction_date or '—' }} {{ payment.extracted_transaction_time or '' }}</td></tr>
+              <tr><th>Screenshot</th><td>{{ 'Uploaded' if payment.proof_file else 'Not uploaded' }}</td></tr>
+              <tr><th>Submitted</th><td>{{ payment.submitted_at or payment.created_at }} UTC</td></tr>
+            </table>
+          </section>
+          {% endif %}
+          {% endif %}{# not unlocked #}
+
+          <div class="alert alert-light border small mb-0">
+            <strong>How verification works:</strong> this is a direct payment to a phone number, so the website
+            cannot confirm it with Safaricom automatically. A pasted SMS or screenshot is <em>not</em> proof of
+            payment on its own — an Africa ScholarBridge administrator checks the payment on the receiving
+            M-PESA account before your visa application is unlocked. Your screenshot is only visible to
+            authorised Visa Admin staff.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  const form = document.getElementById('mpesaForm');
+  if (!form) return;
+  const msg = document.getElementById('mpesaMessage');
+  const file = document.getElementById('paymentProof');
+  const preview = document.getElementById('proofPreview');
+  const manualBox = document.getElementById('manualCodeBox');
+  const manualCode = document.getElementById('manualCode');
+  const flagsList = document.getElementById('detectedFlags');
+  const fields = document.querySelectorAll('#detected [data-field]');
+  let timer = null;
+
+  function render(detected, flags) {
+    fields.forEach(function (el) {
+      let v = detected ? detected[el.dataset.field] : null;
+      if (v && el.dataset.field === 'amount') v = 'KSh ' + v;
+      el.textContent = v || '—';
+    });
+    flagsList.innerHTML = '';
+    (flags || []).forEach(function (f) {
+      if (f.severity === 'ok') return;
+      const li = document.createElement('li');
+      li.className = f.severity === 'error' ? 'text-danger' : 'text-warning-emphasis';
+      li.textContent = (f.severity === 'error' ? '✖ ' : '⚠ ') + f.message;
+      flagsList.appendChild(li);
+    });
+  }
+
+  function updateManualBox() {
+    const needCode = file.files.length > 0 && !msg.value.trim();
+    manualBox.classList.toggle('d-none', !needCode);
+    manualCode.required = needCode;
+  }
+
+  // Parsing happens on the SERVER (same code the submit button uses);
+  // this only shows the student what was detected.
+  function parse() {
+    const text = msg.value;
+    if (!text.trim()) { render(null, []); return; }
+    const body = new FormData();
+    body.append('mpesa_message', text);
+    fetch(form.dataset.parseUrl, { method: 'POST', body: body, credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) { if (data) render(data.detected, data.flags); })
+      .catch(function () {});
+  }
+
+  msg.addEventListener('input', function () {
+    clearTimeout(timer); timer = setTimeout(parse, 350); updateManualBox();
+  });
+  file.addEventListener('change', function () {
+    updateManualBox();
+    const f = file.files[0];
+    if (f && f.type.startsWith('image/')) {
+      preview.src = URL.createObjectURL(f); preview.classList.remove('d-none');
+    } else { preview.classList.add('d-none'); }
+  });
+  manualCode.addEventListener('input', function () { manualCode.value = manualCode.value.toUpperCase(); });
+})();
+</script>
+{% endblock %}

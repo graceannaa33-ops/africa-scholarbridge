@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Visa Request {{ visa_request.request_number }} — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-folder2-open"></i> Visa Request {{ visa_request.request_number }}</h2>
+    <p class="mb-0 text-muted">{{ visa_request.student_name }}</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="row g-4 mt-2">
+    <div class="col-lg-7">
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Applicant</h5>
+          <table class="table table-sm">
+            <tr><th>Student</th><td>{{ visa_request.student_name }}</td></tr>
+            <tr><th>Email</th><td>{{ visa_request.email }}</td></tr>
+            <tr><th>Country</th><td>{{ visa_request.country }}</td></tr>
+            <tr><th>Citizenship</th><td>{{ visa_request.citizenship or '—' }}</td></tr>
+            <tr><th>U.S. Institution / Program</th><td>{{ visa_request.us_institution or '—' }} / {{ visa_request.program or '—' }}</td></tr>
+            <tr><th>Visa Category</th><td>{{ visa_request.visa_category or '—' }}</td></tr>
+            <tr><th>Funding Sources</th><td>{{ visa_request.funding_sources or '—' }}</td></tr>
+            <tr><th>Assistance Requested</th><td>{{ visa_request.assistance_required or '—' }}</td></tr>
+            <tr><th>Submission Status</th>
+              <td>
+                <span class="badge {{ 'bg-success' if visa_request.submission_status == 'complete' else 'bg-secondary' }}">{{ visa_request.submission_status.replace('_',' ')|title }}</span>
+                {% if visa_request.automatically_approved %}<span class="badge bg-info text-dark ms-1">Auto-Completed (Internal)</span>{% endif %}
+              </td>
+            </tr>
+          </table>
+          {% if visa_request.automatically_approved %}
+          <p class="small text-muted mb-0">
+            "Auto-Completed" means Africa ScholarBridge's own submission checklist is done and payment is
+            verified. This is an internal completion only - it is NOT an official U.S. government visa decision.
+          </p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Payments (M-PESA, manually verified)</h5>
+          {% for p in payments %}
+          <div class="border rounded p-3 mb-3">
+            <div class="row g-2 small">
+              <div class="col-md-6"><strong>Amount:</strong> {{ 'KSh {:,.2f}'.format(p.submitted_amount) if p.submitted_amount is not none else (p.currency ~ ' ' ~ p.amount) }}</div>
+              <div class="col-md-6"><strong>Status:</strong> <span class="badge {{ 'bg-success' if p.payment_status == 'PAYMENT_VERIFIED' else 'bg-danger' if p.payment_status == 'PAYMENT_REJECTED' else 'bg-warning text-dark' }}">{{ {'PAYMENT_PENDING':'Pending Verification','PAYMENT_VERIFIED':'Verified','PAYMENT_REJECTED':'Rejected'}.get(p.payment_status, p.proof_status) }}</span></div>
+              <div class="col-md-6"><strong>M-PESA transaction:</strong> <span class="font-monospace">{{ p.mpesa_transaction_code or p.transaction_reference or '—' }}</span></div>
+              <div class="col-md-6"><strong>Payment phone:</strong> {{ p.phone_number or '—' }}</div>
+              <div class="col-md-6"><strong>Submitted:</strong> {{ p.submitted_at or p.created_at }}</div>
+              <div class="col-md-6"><strong>Reviewed:</strong> {{ p.reviewed_at or '—' }}</div>
+            </div>
+            {% if p.rejection_reason %}<p class="small text-danger mt-2 mb-0"><strong>Rejection reason:</strong> {{ p.rejection_reason }}</p>{% endif %}
+            <a class="btn btn-sm {{ 'btn-primary' if p.payment_status == 'PAYMENT_PENDING' else 'btn-outline-primary' }} mt-2" href="{{ url_for('visa_admin_payment_detail', payment_id=p.id) }}">{{ 'Review &amp; Verify / Reject'|safe if p.payment_status == 'PAYMENT_PENDING' else 'Open payment' }}</a>
+          </div>
+          {% else %}
+            <p class="text-muted mb-0">No payment submitted yet.</p>
+          {% endfor %}
+          <p class="small text-muted mb-0">A submitted SMS or screenshot never verifies a payment. Only a Visa Admin clicking VERIFY PAYMENT does.</p>
+        </div>
+      </div>
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start flex-wrap">
+            <h5 class="fw-bold mb-3">🇺🇸 U.S. Visa Fee Coverage (Money OUT from Africa ScholarBridge)</h5>
+            <span class="badge bg-info text-dark">{{ fee_coverage_labels.get(visa_request.visa_fee_coverage_status, visa_request.visa_fee_coverage_status) }}</span>
+          </div>
+          <p class="small text-muted">Africa ScholarBridge's OWN payment toward the student's US${{ us_gov_fee }} government visa fee — never a second charge to the student.</p>
+          <table class="table table-sm">
+            <tr><th>Coverage Status</th><td>{{ fee_coverage_labels.get(visa_request.visa_fee_coverage_status, visa_request.visa_fee_coverage_status) }}</td></tr>
+            <tr><th>Payment Reference</th><td>{{ visa_request.visa_fee_payment_reference or '—' }}</td></tr>
+            <tr><th>Official Reference / Receipt</th><td>{{ visa_request.visa_fee_official_reference or '—' }}</td></tr>
+            <tr><th>Payment Date</th><td>{{ visa_request.visa_fee_payment_date or '—' }}</td></tr>
+            <tr><th>Handled By</th><td>{{ 'Visa Admin #' ~ visa_request.visa_fee_handled_by if visa_request.visa_fee_handled_by else '—' }}</td></tr>
+          </table>
+
+          <form method="POST" class="row g-2 mb-3">
+            <input type="hidden" name="action" value="update_fee_coverage_status">
+            <div class="col-auto">
+              <select name="visa_fee_coverage_status" class="form-select form-select-sm">
+                {% for s in fee_coverage_statuses %}
+                <option value="{{ s }}" {{ 'selected' if visa_request.visa_fee_coverage_status == s }}>{{ fee_coverage_labels.get(s, s) }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-auto">
+              <input type="text" name="note" class="form-control form-control-sm" placeholder="Note (optional)">
+            </div>
+            <div class="col-auto">
+              <button type="submit" class="btn btn-sm btn-outline-primary">Update Coverage Status</button>
+            </div>
+          </form>
+
+          <hr>
+          <h6 class="fw-bold">Record the US${{ us_gov_fee }} Payment</h6>
+          <form method="POST" class="row g-2">
+            <input type="hidden" name="action" value="record_fee_coverage_payment">
+            <div class="col-md-6"><input type="text" name="payment_reference" class="form-control form-control-sm" placeholder="Africa ScholarBridge payment reference"></div>
+            <div class="col-md-6"><input type="text" name="official_reference" class="form-control form-control-sm" placeholder="Official U.S. gov't receipt/reference"></div>
+            <div class="col-md-4"><input type="date" name="payment_date" class="form-control form-control-sm"></div>
+            <div class="col-md-4"><input type="text" name="receipt_filename" class="form-control form-control-sm" placeholder="Receipt filename (optional)"></div>
+            <div class="col-md-4"><input type="text" name="notes" class="form-control form-control-sm" placeholder="Notes"></div>
+            <div class="col-12">
+              <button type="submit" class="btn btn-sm btn-success">Record Fee Paid by Africa ScholarBridge</button>
+            </div>
+          </form>
+
+          {% if fee_transactions %}
+          <hr>
+          <h6 class="fw-bold small">Fee Coverage Ledger</h6>
+          <ul class="list-unstyled small">
+            {% for t in fee_transactions %}
+            <li class="mb-1">{{ t.created_at }} — <strong>{{ t.status }}</strong>{% if t.payment_reference %} — ref: {{ t.payment_reference }}{% endif %}{% if t.notes %} — {{ t.notes }}{% endif %}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Refunds (Africa ScholarBridge Service Fee Only)</h5>
+          <p class="small text-muted mb-2">
+            {% if refund_eligible %}✅{% else %}🚫{% endif %} {{ refund_reason_hint }}
+          </p>
+          <p class="small text-muted">This never covers the US${{ us_gov_fee }} government fee once Africa ScholarBridge has paid it — that follows the official U.S. government refund process instead.</p>
+          <form method="POST" class="row g-2">
+            <input type="hidden" name="action" value="update_refund_status">
+            <div class="col-auto">
+              <select name="refund_status" class="form-select form-select-sm">
+                {% for s in ['not_requested','requested','approved','denied','refunded'] %}
+                <option value="{{ s }}" {{ 'selected' if visa_request.refund_status == s }}>{{ s.replace('_',' ')|title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-auto"><input type="text" name="refund_reason" class="form-control form-control-sm" placeholder="Reason" value="{{ visa_request.refund_reason or '' }}"></div>
+            <div class="col-auto"><input type="text" name="refund_notes" class="form-control form-control-sm" placeholder="Notes"></div>
+            <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-secondary">Update Refund Status</button></div>
+          </form>
+        </div>
+      </div>
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Documents</h5>
+          <ul class="list-unstyled small mb-2">
+            {% for d in documents %}
+            <li>{{ d.document_type }} — <span class="badge {{ 'bg-success' if d.status in ['Uploaded','Verified'] else 'bg-warning text-dark' if d.status == 'Replacement Requested' else 'bg-secondary' }}">{{ d.status }}</span></li>
+            {% endfor %}
+          </ul>
+          <a href="{{ url_for('visa_admin_documents') }}" class="btn btn-sm btn-outline-primary">Manage Documents &rarr;</a>
+        </div>
+      </div>
+
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Status History</h5>
+          <ul class="list-unstyled small">
+            {% for h in history %}
+            <li class="mb-1">{{ h.created_at }} — <strong>{{ h.status.replace('_',' ')|title }}</strong>{% if h.note %} — {{ h.note }}{% endif %}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      {% if tracker %}
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h6 class="fw-bold">{{ tracker.week_label }} — {{ tracker.stage_label }}</h6>
+          <p class="mb-1">Day {{ tracker.current_day }} of {{ tracker.total_days }} — {{ tracker.days_remaining }} remaining</p>
+          <div class="asb-visa-tracker-bar mb-2"><div class="asb-visa-tracker-fill" style="width: {{ tracker.percent }}%;"></div></div>
+          <p class="small text-muted mb-0">Est. completion: {{ tracker.estimated_completion.strftime('%B %-d, %Y') }}</p>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h6 class="fw-bold mb-3">Update Status</h6>
+          <form method="POST" class="mb-3">
+            <input type="hidden" name="action" value="update_status">
+            <select name="application_status" class="form-select form-select-sm mb-2">
+              {% for s in ['payment_required','application_unlocked','information_required','preparation','application_review','document_review','fee_coverage_processing','interview_preparation','final_guidance','completed','cancelled'] %}
+              <option value="{{ s }}" {{ 'selected' if visa_request.application_status == s }}>{{ s.replace('_',' ')|title }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm w-100 text-white" style="background: var(--asb-visa-blue);">Update Status</button>
+          </form>
+          <p class="small text-muted mb-3">The student sees this update immediately on their own Visa Dashboard.</p>
+
+          <form method="POST" class="mb-0">
+            <input type="hidden" name="action" value="request_information">
+            <textarea name="note" class="form-control form-control-sm mb-2" rows="2" placeholder="What information is required from the student?"></textarea>
+            <button type="submit" class="btn btn-sm btn-outline-warning w-100">Request Information (Pause Timer)</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card asb-card">
+        <div class="card-body">
+          <h6 class="fw-bold mb-3">Notes / Messages</h6>
+          <form method="POST" class="mb-3">
+            <input type="hidden" name="action" value="add_note">
+            <textarea name="note" class="form-control form-control-sm mb-2" rows="2" placeholder="Add a note or message"></textarea>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="visible_to_student" id="vts" checked>
+              <label class="form-check-label small" for="vts">Visible to student</label>
+            </div>
+            <button type="submit" class="btn btn-sm btn-outline-primary w-100">Add Note</button>
+          </form>
+          <ul class="list-unstyled small">
+            {% for n in notes %}
+            <li class="mb-2">{{ n.created_at }} {% if not n.visible_to_student %}<span class="badge bg-secondary">Internal</span>{% endif %}<br>{{ n.note }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

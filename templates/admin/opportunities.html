@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Admin — Funding Opportunities{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">Funding Opportunities</h2>
+  {% include 'admin/_nav.html' %}
+
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">Add Opportunity</h5>
+          <form method="POST">
+            <div class="mb-2"><label class="form-label">Program</label>
+              <select name="program_id" class="form-select" required>
+                {% for p in programs %}<option value="{{ p.id }}">{{ p.org_name }} — {{ p.name }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="mb-2"><label class="form-label">Title</label><input type="text" name="title" class="form-control" required></div>
+            <div class="mb-2"><label class="form-label">Funding Type</label><input type="text" name="funding_type" class="form-control" placeholder="Scholarship / Grant / Fellowship / Sponsorship" required></div>
+            <div class="mb-2"><label class="form-label">Description</label><textarea name="description" class="form-control" rows="2"></textarea></div>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label small">Amount</label><input type="text" name="amount" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Coverage</label><input type="text" name="coverage" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Eligible Countries (csv)</label><input type="text" name="eligible_countries" class="form-control" placeholder="Kenya, Uganda or All"></div>
+              <div class="col-6"><label class="form-label small">Education Levels (csv)</label><input type="text" name="education_levels" class="form-control" placeholder="Undergraduate, Master's"></div>
+              <div class="col-6"><label class="form-label small">Fields (csv)</label><input type="text" name="fields" class="form-control" placeholder="All or specific fields"></div>
+              <div class="col-6"><label class="form-label small">Study Destination</label><input type="text" name="study_destination" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Open Date</label><input type="date" name="open_date" class="form-control"></div>
+              <div class="col-6"><label class="form-label small">Close Date</label><input type="date" name="close_date" class="form-control"></div>
+            </div>
+            <div class="mb-2 mt-2"><label class="form-label">Eligibility Notes</label><textarea name="eligibility_notes" class="form-control" rows="2"></textarea></div>
+            <div class="mb-2"><label class="form-label">Requirements</label><textarea name="requirements" class="form-control" rows="2"></textarea></div>
+            <div class="mb-2"><label class="form-label">Required Documents</label><textarea name="required_documents" class="form-control" rows="2"></textarea></div>
+            <div class="mb-2">
+              <label class="form-label">Application Method</label>
+              <select name="application_method" class="form-select">
+                <option>Partner Application</option><option>Official External Application</option><option>Funding Match</option>
+              </select>
+            </div>
+            <div class="mb-2"><label class="form-label">Official Application URL</label><input type="url" name="application_url" class="form-control"></div>
+            <div class="form-check mb-2"><input type="checkbox" name="fully_funded" class="form-check-input" id="ff2"><label class="form-check-label" for="ff2">Fully Funded</label></div>
+            <div class="mb-2">
+              <label class="form-label">Verification Status</label>
+              <select name="verification_status" class="form-select"><option>Verified</option><option>Pending</option><option>Unverified</option></select>
+            </div>
+
+            <hr>
+            <h6 class="fw-bold">🏦 Payment / Payout Requirements</h6>
+            <p class="small text-muted">Set from this provider's own real disbursement process - never guessed.</p>
+            <div class="row g-2">
+              <div class="col-6">
+                <label class="form-label small">Bank Details Required?</label>
+                <select name="bank_details_required" class="form-select">
+                  <option value="FALSE">FALSE — provider never needs bank details</option>
+                  <option value="TRUE">TRUE — provider always needs bank details</option>
+                  <option value="PROVIDER_SPECIFIC">PROVIDER_SPECIFIC — varies, confirmed later</option>
+                </select>
+              </div>
+              <div class="col-6"><label class="form-label small">Payment Method</label>
+                <input type="text" name="payment_method" class="form-control" placeholder="e.g. Bank transfer"></div>
+              <div class="col-6"><label class="form-label small">Payment Currency</label>
+                <input type="text" name="payment_currency" class="form-control" placeholder="e.g. KES"></div>
+              <div class="col-6 d-flex align-items-end gap-3">
+                <div class="form-check"><input type="checkbox" name="mobile_money_supported" class="form-check-input" id="mms2"><label class="form-check-label small" for="mms2">Mobile Money OK</label></div>
+                <div class="form-check"><input type="checkbox" name="international_transfer_supported" class="form-check-input" id="its2"><label class="form-check-label small" for="its2">Int'l Transfer OK</label></div>
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 mt-3">Add Opportunity</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">All Opportunities</h5>
+          <table class="table table-sm">
+            <thead><tr><th>Title</th><th>Org</th><th>Status</th><th>Verified</th><th>🏦 Bank Details</th><th></th></tr></thead>
+            <tbody>
+            {% for o in opportunities %}
+              <tr>
+                <td>{{ o.title }} {% if o.is_demo %}<span class="badge bg-secondary">Demo</span>{% endif %}</td>
+                <td class="small">{{ o.org_name }}</td>
+                <td><span class="badge {{ 'bg-success' if o.is_open else 'bg-secondary' }}">{{ 'Open' if o.is_open else 'Closed' }}</span></td>
+                <td><span class="badge {{ 'bg-success' if o.verification_status == 'Verified' else 'bg-warning text-dark' }}">{{ o.verification_status }}</span></td>
+                <td><span class="badge {{ 'bg-warning text-dark' if o.bank_details_required == 'TRUE' else 'bg-info text-dark' if o.bank_details_required == 'PROVIDER_SPECIFIC' else 'bg-secondary' }}">{{ o.bank_details_required }}</span></td>
+                <td class="d-flex gap-1">
+                  <form method="POST" action="{{ url_for('admin_toggle_opportunity', opp_id=o.id) }}">
+                    <button class="btn btn-sm btn-outline-secondary">{{ 'Close' if o.is_open else 'Reopen' }}</button>
+                  </form>
+                  {% if o.verification_status != 'Verified' %}
+                  <form method="POST" action="{{ url_for('admin_verify_opportunity', opp_id=o.id) }}">
+                    <button class="btn btn-sm btn-outline-success">Verify</button>
+                  </form>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

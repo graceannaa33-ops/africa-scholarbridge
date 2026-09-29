@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Admin — Applications{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">Applications</h2>
+  {% include 'admin/_nav.html' %}
+
+  <form method="GET" class="card asb-card p-3 mb-3">
+    <div class="row g-2">
+      <div class="col-md-5"><input type="text" name="q" class="form-control" placeholder="Search by name or reference..." value="{{ search }}"></div>
+      <div class="col-md-4">
+        <select name="status" class="form-select">
+          <option value="">All Statuses</option>
+          {% for s in statuses %}<option {{ 'selected' if selected_status == s }}>{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3"><button type="submit" class="btn btn-primary w-100">Filter</button></div>
+    </div>
+  </form>
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <table class="table table-hover">
+        <thead><tr><th>Student</th><th>Country</th><th>Reference</th><th>Status</th><th>Updated</th><th>Confirmation Email</th><th></th></tr></thead>
+        <tbody>
+        {% for a in applications %}
+          <tr>
+            <td>{{ a.full_name }}</td>
+            <td>{{ a.country }}</td>
+            <td>{{ a.reference_number or '—' }}</td>
+            <td><span class="badge bg-info text-dark">{{ a.status }}</span></td>
+            <td class="small text-muted">{{ a.last_updated }}</td>
+            <td>
+              {% if a.status == 'Submitted' or a.reference_number %}
+                {% if a.confirmation_email_status == 'SENT' %}
+                  <span class="badge bg-success">Sent</span>
+                {% elif a.confirmation_email_status == 'FAILED' %}
+                  <span class="badge bg-danger">Failed</span>
+                {% else %}
+                  <span class="badge bg-secondary">Pending</span>
+                {% endif %}
+              {% else %}
+                <span class="text-muted small">—</span>
+              {% endif %}
+            </td>
+            <td><a href="{{ url_for('admin_application_detail', application_id=a.id) }}" class="btn btn-sm btn-outline-primary">Review</a></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-muted text-center">No applications found.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

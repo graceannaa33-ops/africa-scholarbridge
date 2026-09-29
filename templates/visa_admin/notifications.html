@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Notifications — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-bell"></i> Visa Notifications</h2>
+    <p class="mb-0 text-muted">Recent 🇺🇸 visa-related notifications sent to students.</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="card asb-card mb-4">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">🔔 New Case Alerts</h5>
+      <ul class="list-group list-group-flush">
+        {% for a in case_alerts %}
+        <li class="list-group-item">
+          <div class="d-flex justify-content-between">
+            <strong>{{ a.student_name or 'Unknown Student' }}{% if a.request_number %} — {{ a.request_number }}{% endif %}</strong>
+            <span class="small text-muted">{{ a.created_at }}</span>
+          </div>
+          <div style="white-space: pre-line;">{{ a.message }}</div>
+          {% if a.request_number %}
+          <a href="{{ url_for('visa_admin_request_detail', request_id=a.request_id) }}" class="btn btn-sm btn-outline-primary mt-2">Open Case</a>
+          {% endif %}
+        </li>
+        {% else %}
+        <li class="list-group-item text-muted text-center py-3">No new case alerts yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">Messages Sent to Students</h5>
+      <ul class="list-group list-group-flush">
+        {% for n in notifications %}
+        <li class="list-group-item">
+          <div class="d-flex justify-content-between">
+            <strong>{{ n.student_name }}</strong>
+            <span class="small text-muted">{{ n.created_at }}</span>
+          </div>
+          <div>{{ n.message }}</div>
+        </li>
+        {% else %}
+        <li class="list-group-item text-muted text-center py-3">No visa notifications yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

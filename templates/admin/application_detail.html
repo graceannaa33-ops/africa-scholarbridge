@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Application {{ application.reference_number }} — Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  {% include 'admin/_nav.html' %}
+  <div class="d-flex justify-content-between align-items-start flex-wrap mb-3">
+    <div>
+      <h3 class="fw-bold mb-0">{{ application.student_name }}</h3>
+      <p class="text-muted">Reference: {{ application.reference_number or 'Not yet submitted' }} &middot; Status: <span class="badge bg-info text-dark">{{ application.status }}</span></p>
+    </div>
+  </div>
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold">Application Details</h5>
+          <table class="table table-sm">
+            <tr><th>Country</th><td>{{ application.country }}</td></tr>
+            <tr><th>Institution</th><td>{{ application.institution }}</td></tr>
+            <tr><th>Education Level</th><td>{{ application.education_level }}</td></tr>
+            <tr><th>Field of Study</th><td>{{ application.field_of_study }}</td></tr>
+            <tr><th>Funding Type Needed</th><td>{{ application.funding_type_needed }}</td></tr>
+            <tr><th>Estimated Financial Need</th><td>{{ application.estimated_financial_need }}</td></tr>
+            <tr><th>Preferences</th><td>{{ application.preferences }}</td></tr>
+            <tr><th>Personal Statement</th><td>{{ application.personal_statement }}</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold">Update Status</h5>
+          <form method="POST">
+            <input type="hidden" name="action" value="update_status">
+            <div class="row g-2">
+              <div class="col-md-6">
+                <select name="status" class="form-select">
+                  {% for s in statuses %}<option {{ 'selected' if application.status == s }}>{{ s }}</option>{% endfor %}
+                </select>
+              </div>
+              <div class="col-md-6"><input type="text" name="note" class="form-control" placeholder="Optional note"></div>
+            </div>
+            <button type="submit" class="btn btn-primary mt-2">Update Status</button>
+          </form>
+          <form method="POST" class="mt-2">
+            <input type="hidden" name="action" value="run_matching">
+            <button type="submit" class="btn btn-outline-primary btn-sm">Re-run Matching Engine</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold">📧 Email Status</h5>
+          {% if application.status == 'Submitted' or application.reference_number %}
+          <table class="table table-sm mb-2">
+            <tr><th>Submission</th><td><span class="badge bg-success">Successful</span></td></tr>
+            <tr><th>Confirmation Email</th>
+              <td>
+                {% if application.confirmation_email_status == 'SENT' %}
+                  <span class="badge bg-success">Sent</span>
+                  <span class="text-muted small ms-1">{{ application.confirmation_email_sent_at }}</span>
+                {% elif application.confirmation_email_status == 'FAILED' %}
+                  <span class="badge bg-danger">Failed</span>
+                {% else %}
+                  <span class="badge bg-secondary">Pending</span>
+                {% endif %}
+              </td>
+            </tr>
+          </table>
+          <form method="POST" action="{{ url_for('admin_resend_confirmation_email', application_id=application.id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">Resend Confirmation Email</button>
+          </form>
+          {% else %}
+          <p class="text-muted small mb-0">This application has not been submitted yet, so no confirmation email applies.</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">History</h5>
+          <ul class="list-group list-group-flush">
+            {% for h in history %}
+            <li class="list-group-item d-flex justify-content-between">
+              <span>{{ h.status }} {% if h.note %}<span class="text-muted">— {{ h.note }}</span>{% endif %}</span>
+              <span class="text-muted small">{{ h.created_at }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card asb-card mb-4">
+        <div class="card-body">
+          <h5 class="fw-bold">Funding Matches</h5>
+          <ul class="list-group list-group-flush mb-3">
+            {% for m in matches %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              <div>{{ m.title }} <span class="badge bg-secondary">{{ m.score }}</span></div>
+              <form method="POST" action="{{ url_for('admin_remove_match', application_id=application.id, match_id=m.id) }}">
+                <button class="btn btn-sm btn-outline-danger">Remove</button>
+              </form>
+            </li>
+            {% else %}
+            <li class="list-group-item text-muted">No matches yet.</li>
+            {% endfor %}
+          </ul>
+          <form method="POST" action="{{ url_for('admin_add_match', application_id=application.id) }}" class="d-flex gap-2">
+            <select name="opportunity_id" class="form-select form-select-sm">
+              {% for o in opportunities %}<option value="{{ o.id }}">{{ o.title }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm btn-primary">Add</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">Documents</h5>
+          <ul class="list-group list-group-flush">
+            {% for d in documents %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+              {{ d.document_type }} <span class="badge {{ 'bg-success' if d.status == 'Verified' else 'bg-primary' if d.status == 'Uploaded' else 'bg-warning text-dark' }}">{{ d.status }}</span>
+              {% if d.status == 'Uploaded' %}
+              <form method="POST" action="{{ url_for('admin_verify_document', application_id=application.id, document_id=d.id) }}">
+                <button class="btn btn-sm btn-outline-success">Verify</button>
+              </form>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

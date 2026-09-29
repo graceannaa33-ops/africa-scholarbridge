@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Africa ScholarBridge — Your Bridge to Education Funding{% endblock %}
+{% block content %}
+
+<section class="asb-hero text-white">
+  <div class="container py-5 text-center">
+    <h1 class="display-4 fw-bold">Your Education. Your Opportunity.<br>Your Bridge to Funding.</h1>
+    <p class="lead mt-3 mb-4">Submit one annual funding application and discover education funding opportunities matched to your profile.</p>
+    <div class="d-flex justify-content-center gap-3 flex-wrap">
+      <a href="{{ url_for('register') if not logged_in_student else url_for('application_start') }}" class="btn btn-warning btn-lg fw-semibold px-4">Start My Annual Application</a>
+      <a href="{{ url_for('funding') }}" class="btn btn-outline-light btn-lg px-4">Explore Funding</a>
+    </div>
+
+    <form method="GET" action="{{ url_for('funding') }}" class="asb-hero-search mx-auto mt-4" role="search">
+      <div class="input-group input-group-lg shadow-sm">
+        <span class="input-group-text bg-white border-0">🔍</span>
+        <input type="text" name="q" class="form-control border-0" placeholder="Search scholarships, sponsors, grants, bursaries..."
+               aria-label="Search scholarships, sponsors, grants, bursaries...">
+        <button type="submit" class="btn btn-warning fw-semibold px-4">Search</button>
+      </div>
+    </form>
+
+    <p class="mt-3 small text-white-50">{{ current_cycle.name if current_cycle else 'Funding cycle opening soon' }}</p>
+  </div>
+</section>
+
+<section class="container py-5" id="how-it-works">
+  <h2 class="text-center fw-bold mb-2">How It Works</h2>
+  <p class="text-center text-muted mb-5">One application. Multiple opportunities. Real tracking, every step of the way.</p>
+  <div class="row g-4 text-center">
+    <div class="col-md-3">
+      <div class="asb-step-icon mx-auto"><i class="bi bi-person-plus"></i></div>
+      <h5 class="mt-3 fw-semibold">1. Create Your Profile</h5>
+      <p class="text-muted small">Register in minutes and tell us about your education journey.</p>
+    </div>
+    <div class="col-md-3">
+      <div class="asb-step-icon mx-auto"><i class="bi bi-file-earmark-text"></i></div>
+      <h5 class="mt-3 fw-semibold">2. Submit Your Annual Application</h5>
+      <p class="text-muted small">One form covers every funding opportunity for the cycle.</p>
+    </div>
+    <div class="col-md-3">
+      <div class="asb-step-icon mx-auto"><i class="bi bi-bullseye"></i></div>
+      <h5 class="mt-3 fw-semibold">3. Get Funding Matches</h5>
+      <p class="text-muted small">Our matching engine finds opportunities that fit your profile.</p>
+    </div>
+    <div class="col-md-3">
+      <div class="asb-step-icon mx-auto"><i class="bi bi-graph-up-arrow"></i></div>
+      <h5 class="mt-3 fw-semibold">4. Apply &amp; Track</h5>
+      <p class="text-muted small">Connect with providers and track your funding decision in real time.</p>
+    </div>
+  </div>
+</section>
+
+<section class="asb-section-alt py-5">
+  <div class="container">
+    <h2 class="text-center fw-bold mb-4">Funding Categories</h2>
+    <div class="row g-3">
+      {% for cat, icon in [('Scholarships','bi-mortarboard'),('Sponsorships','bi-hand-thumbs-up'),('Grants','bi-cash-coin'),
+                            ('Fellowships','bi-people'),('Government Funding','bi-bank'),('University Funding','bi-building'),
+                            ('Research Funding','bi-search'),('Emergency Education Funding','bi-heart-pulse')] %}
+      <div class="col-6 col-md-3">
+        <div class="card asb-card h-100 text-center border-0 shadow-sm">
+          <div class="card-body">
+            <i class="bi {{ icon }} fs-2 text-primary"></i>
+            <p class="mt-2 mb-0 fw-semibold">{{ cat }}</p>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="container py-5">
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold mb-0">Featured Opportunities</h2>
+    <a href="{{ url_for('opportunities') }}" class="btn btn-outline-primary btn-sm">View All &rarr;</a>
+  </div>
+  <div class="row g-4">
+    {% for opp in featured %}
+    <div class="col-md-4">
+      <div class="card asb-card h-100 shadow-sm">
+        <div class="card-body d-flex flex-column">
+          <span class="badge asb-badge-type mb-2 align-self-start">{{ opp.funding_type }}</span>
+          <h5 class="fw-semibold">{{ opp.title }}</h5>
+          <p class="text-muted small mb-1"><i class="bi bi-building"></i> {{ opp.org_name }}</p>
+          <p class="text-muted small flex-grow-1">{{ (opp.description or '')[:110] }}{% if opp.description and opp.description|length > 110 %}...{% endif %}</p>
+          <a href="{{ url_for('opportunity_detail', opp_id=opp.id) }}" class="btn btn-sm btn-primary mt-2">View Details</a>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No opportunities available yet.</p>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="asb-section-alt py-5">
+  <div class="container">
+    <h2 class="text-center fw-bold mb-4">Trusted Organizations</h2>
+    <div class="row g-3 text-center">
+      {% for org in organizations %}
+      <div class="col-6 col-md-3 col-lg-1-5">
+        <div class="asb-org-chip">
+          <div class="asb-org-initial">{{ org.logo_initial or org.name[0] }}</div>
+          <p class="small mt-2 mb-0 fw-semibold">{{ org.name }}</p>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="container py-5">
+  <h2 class="text-center fw-bold mb-4">Africa ScholarBridge by the Numbers <span class="badge bg-secondary">Demo Data</span></h2>
+  <div class="row g-4 text-center">
+    <div class="col-6 col-md-3">
+      <div class="asb-stat"><h3 class="fw-bold text-primary">{{ stats.students }}+</h3><p class="text-muted mb-0">Students Registered</p></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="asb-stat"><h3 class="fw-bold text-primary">{{ stats.opportunities }}+</h3><p class="text-muted mb-0">Funding Opportunities</p></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="asb-stat"><h3 class="fw-bold text-primary">{{ stats.organizations }}+</h3><p class="text-muted mb-0">Organizations</p></div>
+    </div>
+    <div class="col-6 col-md-3">
+      <div class="asb-stat"><h3 class="fw-bold text-primary">{{ stats.applications }}+</h3><p class="text-muted mb-0">Applications Processed</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="container py-5">
+  <div class="asb-visa-hero p-5 text-center">
+    <h2 class="fw-bold">🇺🇸 Get U.S. Student Visa Application Assistance</h2>
+    <p class="lead mb-1">Pay only US$11.59 (KSh 1,500) to Africa ScholarBridge.</p>
+    <p class="mb-1">Africa ScholarBridge covers the applicable US$185 U.S. student visa application processing fee under this service.</p>
+    <p class="mb-4">Get application assistance, document guidance, DS-160 support, interview preparation, and application tracking. &nbsp;·&nbsp; ⏱️ Up to 2 Weeks</p>
+    <a href="{{ url_for('student_visa_landing') }}" class="btn btn-warning btn-lg fw-semibold px-4">Pay US$11.59 &amp; Start Application</a>
+  </div>
+</section>
+
+<section class="asb-cta text-center text-white py-5">
+  <div class="container">
+    <h2 class="fw-bold">Start Your Annual Funding Application</h2>
+    <p class="lead">Submit once. Get matched. Move forward with confidence.</p>
+    <a href="{{ url_for('register') if not logged_in_student else url_for('application_start') }}" class="btn btn-warning btn-lg fw-semibold px-4">Start My Annual Application</a>
+  </div>
+</section>
+
+{% endblock %}

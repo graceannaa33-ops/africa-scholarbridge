@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Admin — All Matches{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">All Funding Matches</h2>
+  {% include 'admin/_nav.html' %}
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <table class="table table-sm">
+        <thead><tr><th>Student</th><th>Reference</th><th>Opportunity</th><th>Score</th><th>Type</th></tr></thead>
+        <tbody>
+        {% for m in matches %}
+          <tr>
+            <td>{{ m.full_name }}</td>
+            <td>{{ m.reference_number }}</td>
+            <td>{{ m.title }}</td>
+            <td>{{ m.score }} ({{ m.match_strength }})</td>
+            <td><span class="badge bg-secondary">{{ m.match_type }}</span></td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="text-muted text-center">No matches yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

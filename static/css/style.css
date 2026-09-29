@@ -1,0 +1,271 @@
+/* ==========================================================================
+   Africa ScholarBridge — style.css
+   Brand colors: Deep Blue, Green, White, Warm Gold accents
+   ========================================================================== */
+
+:root {
+  --asb-blue: #0b3d66;
+  --asb-blue-dark: #072943;
+  --asb-green: #1a7a4c;
+  --asb-gold: #f2a900;
+  --asb-light: #f7f9fb;
+}
+
+body {
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--asb-light);
+  color: #1f2933;
+}
+
+/* Navbar ------------------------------------------------------------- */
+.asb-navbar {
+  background: linear-gradient(90deg, var(--asb-blue-dark), var(--asb-blue));
+}
+.asb-navbar .nav-link {
+  font-weight: 500;
+}
+.asb-navbar .nav-link:hover {
+  color: var(--asb-gold) !important;
+}
+.asb-logo {
+  font-size: 1.3rem;
+}
+
+/* Hero ----------------------------------------------------------------- */
+.asb-hero {
+  background: linear-gradient(135deg, var(--asb-blue-dark), var(--asb-blue) 60%, var(--asb-green));
+}
+
+.asb-cta {
+  background: linear-gradient(135deg, var(--asb-green), var(--asb-blue));
+}
+
+/* Global funding search bar (home page hero) --------------------------- */
+.asb-hero-search {
+  max-width: 640px;
+  width: 100%;
+}
+.asb-hero-search .input-group {
+  border-radius: 2rem;
+  overflow: hidden;
+}
+.asb-hero-search .form-control {
+  min-width: 0; /* keeps the input from overflowing on narrow phone screens */
+}
+.asb-hero-search .btn {
+  border-radius: 0;
+}
+@media (max-width: 576px) {
+  .asb-hero-search .input-group { flex-wrap: nowrap; }
+  .asb-hero-search .btn { padding-left: 1rem; padding-right: 1rem; }
+}
+
+/* Cards ------------------------------------------------------------------ */
+.asb-card {
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 0.75rem;
+}
+.asb-card:hover {
+  box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.08);
+  transition: box-shadow 0.2s ease-in-out;
+}
+.asb-stat-card {
+  border-left: 4px solid var(--asb-gold);
+  border-radius: 0.5rem;
+  background: white;
+}
+
+.asb-step-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(11, 61, 102, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  color: var(--asb-blue);
+}
+
+.asb-section-alt {
+  background-color: #eef3f7;
+}
+
+.asb-badge-type {
+  background-color: var(--asb-blue);
+  color: white;
+}
+
+.asb-org-chip {
+  padding: 1rem 0.5rem;
+}
+.asb-org-initial {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--asb-blue);
+  color: white;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.asb-stat h3 {
+  font-size: 2.2rem;
+}
+
+/* Score badges ------------------------------------------------------- */
+.asb-score-badge {
+  display: inline-block;
+  width: 52px;
+  height: 52px;
+  line-height: 52px;
+  border-radius: 50%;
+  color: white;
+  font-weight: bold;
+  text-align: center;
+}
+.asb-score-high { background-color: var(--asb-green); }
+.asb-score-good { background-color: #2f8f62; }
+.asb-score-mid  { background-color: var(--asb-gold); color: #333; }
+
+/* Tracker -------------------------------------------------------------- */
+.asb-tracker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.asb-tracker-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 100px;
+  text-align: center;
+  position: relative;
+}
+.asb-tracker-dot {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+.asb-tracker-step.done .asb-tracker-dot {
+  background: var(--asb-green);
+  color: white;
+}
+.asb-tracker-step.active .asb-tracker-dot {
+  background: var(--asb-gold);
+  color: #333;
+}
+.asb-tracker-label {
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+/* Footer ------------------------------------------------------------- */
+.asb-footer {
+  background-color: var(--asb-blue-dark);
+  color: #cbd5e1;
+}
+.asb-footer a {
+  color: #cbd5e1;
+  text-decoration: none;
+}
+.asb-footer a:hover {
+  color: var(--asb-gold);
+}
+
+/* Utility -------------------------------------------------------------- */
+.col-lg-1-5 {
+  flex: 0 0 auto;
+  width: 20%;
+}
+@media (max-width: 767px) {
+  .col-lg-1-5 { width: 50%; }
+}
+
+/* U.S. Student Visa Assistance ------------------------------------------ */
+:root {
+  --asb-visa-blue: #1a3e6f;
+  --asb-visa-red: #b31942;
+}
+.asb-visa-promo {
+  background: linear-gradient(135deg, rgba(26,62,111,0.08), rgba(179,25,66,0.06));
+  border: 1px solid rgba(26,62,111,0.2);
+}
+.asb-visa-hero {
+  background: linear-gradient(135deg, var(--asb-visa-blue), var(--asb-blue) 55%, var(--asb-visa-red));
+  color: #fff;
+  border-radius: 0.75rem;
+}
+.asb-fee-box {
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 0.75rem;
+  background: #fff;
+}
+.asb-fee-box.asb-fee-service {
+  border-left: 4px solid var(--asb-gold);
+}
+.asb-fee-box.asb-fee-gov {
+  border-left: 4px solid var(--asb-visa-red);
+}
+.asb-visa-tracker-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+.asb-visa-tracker-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--asb-visa-blue), var(--asb-green));
+}
+.asb-locked-banner {
+  background: #fff3cd;
+  border: 1px solid #ffe69c;
+  border-radius: 0.5rem;
+}
+
+/* -------------------------------------------------------------------- */
+/* VISA ADMIN PORTAL - a dedicated visual design, deliberately different */
+/* from the Main Admin portal's gold-accented look, so the two admin    */
+/* systems are visually unmistakable from one another at a glance.      */
+/* -------------------------------------------------------------------- */
+.asb-visa-admin-header {
+  background: linear-gradient(135deg, var(--asb-visa-blue), var(--asb-visa-red) 130%);
+  color: #fff;
+  border-radius: 0.75rem;
+  padding: 1.5rem 1.75rem;
+}
+.asb-visa-admin-header .text-muted { color: rgba(255,255,255,0.75) !important; }
+.asb-visa-admin-nav {
+  background: #10254a;
+  border-radius: 0.6rem;
+  padding: 0.4rem 0.6rem;
+}
+.asb-visa-admin-nav .nav-link {
+  color: rgba(255,255,255,0.8);
+  border-radius: 0.4rem;
+  font-size: 0.92rem;
+}
+.asb-visa-admin-nav .nav-link.active,
+.asb-visa-admin-nav .nav-link:hover {
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+}
+.asb-visa-admin-nav .nav-link.text-danger-light { color: #ffb3c1; }
+.asb-visa-stat-card {
+  border-left: 4px solid var(--asb-visa-blue);
+  border-radius: 0.6rem;
+}
+.asb-visa-stat-card.accent-red { border-left-color: var(--asb-visa-red); }
+.asb-visa-stat-card.accent-green { border-left-color: var(--asb-green); }

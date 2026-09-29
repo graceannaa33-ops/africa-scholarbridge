@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Admin — Organizations{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">Organizations</h2>
+  {% include 'admin/_nav.html' %}
+
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">Add Organization</h5>
+          <form method="POST">
+            <div class="mb-2"><label class="form-label">Name</label><input type="text" name="name" class="form-control" required></div>
+            <div class="mb-2">
+              <label class="form-label">Type</label>
+              <select name="org_type" class="form-select">
+                {% for t in ['Scholarship Provider','Fellowship Provider','Grant Provider','Sponsorship Provider',
+                             'Foundation','Government Organization','Development Bank','Education Organization',
+                             'International Organization','University Network','Funding Search Platform','NGO','Other'] %}
+                <option>{{ t }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="mb-2"><label class="form-label">Region</label><input type="text" name="region" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">Website URL</label><input type="url" name="website_url" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">Description</label><textarea name="description" class="form-control" rows="3"></textarea></div>
+            <div class="mb-2">
+              <label class="form-label">Verification Status</label>
+              <select name="verification_status" class="form-select">
+                <option>Verified</option><option>Pending</option><option>Unverified</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Add Organization</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-7">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">All Organizations</h5>
+          <table class="table table-sm">
+            <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Add Program</th></tr></thead>
+            <tbody>
+            {% for org in organizations %}
+              <tr>
+                <td>{{ org.name }} {% if org.is_demo %}<span class="badge bg-secondary">Demo</span>{% endif %}</td>
+                <td class="small">{{ org.org_type }}</td>
+                <td><span class="badge {{ 'bg-success' if org.verification_status == 'Verified' else 'bg-warning text-dark' }}">{{ org.verification_status }}</span></td>
+                <td>
+                  <form method="POST" action="{{ url_for('admin_add_program', org_id=org.id) }}" class="d-flex gap-1">
+                    <input type="text" name="name" class="form-control form-control-sm" placeholder="Program name" required>
+                    <button class="btn btn-sm btn-outline-primary">Add</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

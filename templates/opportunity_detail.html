@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}{{ opp.title }} — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <nav class="mb-3 small"><a href="{{ url_for('opportunities') }}">&larr; Back to Find Funding</a></nav>
+  <div class="row g-4">
+    <div class="col-lg-8">
+      <span class="badge asb-badge-type mb-2">{{ opp.funding_type }}</span>
+      {% if opp.fully_funded %}<span class="badge bg-success mb-2">Fully Funded</span>{% endif %}
+      <span class="badge {{ 'bg-success' if opp.verification_status == 'Verified' else 'bg-warning text-dark' }} mb-2"><i class="bi bi-patch-check"></i> {{ opp.verification_status }}</span>
+      <h2 class="fw-bold">{{ opp.title }}</h2>
+      <p class="text-muted"><i class="bi bi-building"></i> <a href="{{ url_for('provider_detail', org_id=opp.org_id) }}">{{ opp.org_name }}</a></p>
+
+      <div class="card asb-card shadow-sm mb-3">
+        <div class="card-body">
+          <h5 class="fw-bold">Description</h5>
+          <p>{{ opp.description or 'No description provided.' }}</p>
+
+          <h5 class="fw-bold mt-4">Eligibility</h5>
+          <ul class="small">
+            <li><strong>Eligible Countries:</strong> {{ opp.eligible_countries or 'All' }}</li>
+            <li><strong>Education Levels:</strong> {{ opp.education_levels or 'All' }}</li>
+            <li><strong>Fields:</strong> {{ opp.fields or 'All' }}</li>
+            <li><strong>Study Destination:</strong> {{ opp.study_destination or 'Any' }}</li>
+          </ul>
+          {% if opp.eligibility_notes %}<p class="small text-muted">{{ opp.eligibility_notes }}</p>{% endif %}
+
+          <h5 class="fw-bold mt-4">Requirements</h5>
+          <p class="small">{{ opp.requirements or 'See official application for full requirements.' }}</p>
+
+          <h5 class="fw-bold mt-4">Required Documents</h5>
+          <p class="small">{{ opp.required_documents or 'Standard document checklist applies.' }}</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-4">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body">
+          <h5 class="fw-bold">Key Details</h5>
+          <table class="table table-sm">
+            <tr><th>Amount</th><td>{{ opp.amount or 'Varies' }}</td></tr>
+            <tr><th>Coverage</th><td>{{ opp.coverage or '—' }}</td></tr>
+            <tr><th>Opens</th><td>{{ opp.open_date or 'TBA' }}</td></tr>
+            <tr><th>Closes</th><td>{{ opp.close_date or 'TBA' }}</td></tr>
+            <tr><th>Status</th><td><span class="badge {{ 'bg-success' if opp.is_open else 'bg-secondary' }}">{{ 'Open' if opp.is_open else 'Closed' }}</span></td></tr>
+            <tr><th>Application Method</th><td>{{ opp.application_method }}</td></tr>
+          </table>
+          {% if days_left is not none and opp.is_open %}
+            {% if days_left <= 7 and days_left >= 0 %}
+              <div class="alert alert-warning small">🔔 Application deadline in {{ days_left }} day{{ 's' if days_left != 1 }}.</div>
+            {% endif %}
+          {% endif %}
+          {% if opp.application_url %}
+          <a href="{{ opp.application_url }}" target="_blank" rel="noopener" class="btn btn-primary w-100 mb-2">Official Application Link <i class="bi bi-box-arrow-up-right"></i></a>
+          {% endif %}
+          {% if logged_in_student %}
+          <a href="{{ url_for('matches') }}" class="btn btn-outline-primary w-100">Check My Matches</a>
+          {% else %}
+          <a href="{{ url_for('register') }}" class="btn btn-outline-primary w-100">Register to Get Matched</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

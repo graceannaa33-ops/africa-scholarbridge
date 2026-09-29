@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Funding Providers — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">Funding Providers &amp; Organizations</h2>
+  <p class="text-muted mb-4">Explore the organizations behind Africa ScholarBridge's funding opportunities.</p>
+
+  <form method="GET" class="card asb-card shadow-sm p-3 mb-4">
+    <div class="row g-2">
+      <div class="col-md-6"><input type="text" name="q" class="form-control" placeholder="Search organizations..." value="{{ search }}"></div>
+      <div class="col-md-4">
+        <select name="org_type" class="form-select">
+          <option value="">All Types</option>
+          {% for t in org_types %}
+          <option {{ 'selected' if selected_type == t }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2"><button type="submit" class="btn btn-primary w-100">Filter</button></div>
+    </div>
+  </form>
+
+  <div class="row g-4">
+    {% for org in organizations %}
+    <div class="col-md-6 col-lg-4">
+      <div class="card asb-card h-100 shadow-sm">
+        <div class="card-body">
+          <div class="d-flex align-items-center mb-2">
+            <div class="asb-org-initial me-3">{{ org.logo_initial or org.name[0] }}</div>
+            <div>
+              <h6 class="fw-bold mb-0">{{ org.name }}</h6>
+              <span class="badge {{ 'bg-success' if org.verification_status == 'Verified' else 'bg-warning text-dark' }} small">{{ org.verification_status }}</span>
+            </div>
+          </div>
+          <p class="small text-muted mb-1">{{ org.org_type }} {% if org.region %}&middot; {{ org.region }}{% endif %}</p>
+          <p class="small">{{ (org.description or '')[:100] }}{% if org.description and org.description|length > 100 %}...{% endif %}</p>
+          <p class="small mb-2"><strong>{{ counts.get(org.id, 0) }}</strong> active opportunit{{ 'y' if counts.get(org.id,0) == 1 else 'ies' }}</p>
+          <a href="{{ url_for('provider_detail', org_id=org.id) }}" class="btn btn-sm btn-outline-primary">View Profile</a>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-muted">No organizations found.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

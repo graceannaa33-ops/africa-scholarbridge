@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Visa Requests — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-folder2-open"></i> Visa Requests</h2>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="row g-4 mb-3">
+    <div class="col-md-6">
+      <div class="card asb-card"><div class="card-body">
+        <h6 class="fw-bold">Requests by Country</h6>
+        <ul class="list-unstyled small mb-0">
+          {% for row in by_country %}<li>{{ row.country or 'Unknown' }}: {{ row.c }}</li>{% endfor %}
+        </ul>
+      </div></div>
+    </div>
+    <div class="col-md-6">
+      <form method="GET" class="card asb-card"><div class="card-body">
+        <h6 class="fw-bold">Filter</h6>
+        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">All Statuses</option>
+          {% for s in ['payment_required','application_unlocked','information_required','preparation','application_review','document_review','fee_coverage_processing','interview_preparation','final_guidance','completed'] %}
+          <option value="{{ s }}" {{ 'selected' if status_filter == s }}>{{ s.replace('_',' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </div></form>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr>
+        <th>Student</th><th>Student ID</th><th>Visa Reference</th><th>Annual Application Ref.</th>
+        <th>Payment</th><th>Application</th><th>Submission</th><th>Fee Coverage</th><th>Processing</th><th>Created</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for r in requests %}
+        <tr>
+          <td>{{ r.student_name }}</td>
+          <td>#{{ r.student_row_id }}</td>
+          <td>{{ r.request_number }}</td>
+          <td>{{ r.annual_application_reference or '—' }}</td>
+          <td><span class="badge {{ 'bg-success' if r.payment_status == 'paid' else 'bg-warning text-dark' if r.payment_status == 'pending_verification' else 'bg-secondary' }}">{{ r.payment_status.replace('_',' ')|title }}</span></td>
+          <td><span class="badge bg-info text-dark">{{ r.application_status.replace('_',' ')|title }}</span></td>
+          <td><span class="badge {{ 'bg-success' if r.submission_status == 'complete' else 'bg-secondary' }}">{{ r.submission_status.replace('_',' ')|title }}</span></td>
+          <td><span class="badge bg-secondary">{{ r.visa_fee_coverage_status }}</span></td>
+          <td class="small">{{ r.application_status.replace('_',' ')|title }}</td>
+          <td class="small text-muted">{{ r.created_at }}</td>
+          <td><a href="{{ url_for('visa_admin_request_detail', request_id=r.id) }}" class="btn btn-sm btn-outline-primary">Open</a></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="11" class="text-muted text-center py-3">No visa requests yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

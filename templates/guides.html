@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Scholarship & Funding Guides — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">Scholarship &amp; Funding Guides</h2>
+  <p class="text-muted mb-4">Learn how education funding works and how to put together a strong application.</p>
+
+  <div class="accordion" id="guidesAccordion">
+    {% set guides = [
+      ('How Scholarships Work', 'A scholarship is funding awarded based on merit, need, or specific criteria that does not need to be repaid. It usually covers tuition, and sometimes living costs.'),
+      ('How Sponsorship Works', 'A sponsorship is funding provided by an organization or individual, often in exchange for future commitments such as working for the sponsor or your home community after graduation.'),
+      ('How Grants Work', 'Grants are typically awarded for a specific purpose - such as research or community projects - and do not need to be repaid.'),
+      ('How Fellowships Work', 'Fellowships support advanced study or research, often including a stipend, and are common at graduate and postgraduate levels.'),
+      ('How to Prepare Applications', 'Start early, read eligibility criteria carefully, gather documents in advance, and tailor your personal statement to each opportunity.'),
+      ('How to Write a Personal Statement', 'Be specific about your goals, connect your story to the funding providers mission, and proofread carefully. Avoid generic statements.'),
+      ('How to Prepare Documents', 'Keep certified copies of transcripts and certificates, request recommendation letters early, and keep a personal document folder up to date.'),
+      ('How to Identify Legitimate Opportunities', 'Verify the providers official website, cross-check the opportunity on multiple trusted sources, and be cautious of unsolicited offers.'),
+      ('How to Avoid Scams', 'Legitimate scholarships never ask you to pay to apply. See our full Scam Alerts page for common warning signs.'),
+      ('How to Meet Deadlines', 'Use the Africa ScholarBridge Funding Calendar, set personal reminders well ahead of the official deadline, and submit early whenever possible.'),
+    ] %}
+    {% for title, body in guides %}
+    <div class="accordion-item">
+      <h2 class="accordion-header">
+        <button class="accordion-button {{ 'collapsed' if not loop.first }}" type="button" data-bs-toggle="collapse" data-bs-target="#g{{ loop.index }}">
+          {{ title }}
+        </button>
+      </h2>
+      <div id="g{{ loop.index }}" class="accordion-collapse collapse {{ 'show' if loop.first }}" data-bs-parent="#guidesAccordion">
+        <div class="accordion-body">{{ body }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

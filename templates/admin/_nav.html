@@ -1,0 +1,25 @@
+<ul class="nav nav-pills mb-3 flex-wrap">
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_dashboard' }}" href="{{ url_for('admin_dashboard') }}">Dashboard</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_applications' }}" href="{{ url_for('admin_applications') }}">Applications</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_students' }}" href="{{ url_for('admin_students') }}">Students</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_cycles' }}" href="{{ url_for('admin_cycles') }}">Cycles</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_organizations' }}" href="{{ url_for('admin_organizations') }}">Organizations</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_opportunities' }}" href="{{ url_for('admin_opportunities') }}">Opportunities</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_matches' }}" href="{{ url_for('admin_matches') }}">Matches</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_providers' }}" href="{{ url_for('admin_providers') }}">Providers</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_decisions' }}" href="{{ url_for('admin_decisions') }}">Decisions</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_banks' }}" href="{{ url_for('admin_banks') }}">🏦 Banks</a></li>
+  <li class="nav-item"><a class="nav-link {{ 'active' if request.endpoint == 'admin_disbursements' }}" href="{{ url_for('admin_disbursements') }}">💰 Disbursements</a></li>
+  <li class="nav-item"><a class="nav-link" href="{{ url_for('visa_admin_payments') }}" title="Opens Visa Payments in the separate Visa Admin portal (Visa Admin login required)">💳 Visa Payments</a></li>
+  <li class="nav-item ms-auto">
+    <!--
+      This is intentionally the ONLY visa-related item in the Main Admin
+      nav - a small link that redirects to the completely separate Visa
+      Admin login. It does not expose any visa data, controls, or stats
+      here. See /visa-admin/* for the actual Visa Admin portal.
+    -->
+    <a class="nav-link text-muted" href="{{ url_for('visa_admin_login') }}" title="Opens the separate U.S. Student Visa Admin portal">
+      🇺🇸 Visa Services &rarr;
+    </a>
+  </li>
+</ul>

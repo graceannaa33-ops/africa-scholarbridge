@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Funding Calendar — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">Funding Calendar</h2>
+  <p class="text-muted mb-4">Track opening and closing dates for funding opportunities and annual cycles.</p>
+
+  <h5 class="fw-bold">Annual Cycles</h5>
+  <table class="table mb-4">
+    <thead><tr><th>Cycle</th><th>Opens</th><th>Closes</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for c in cycles %}
+      <tr><td>{{ c.name }}</td><td>{{ c.open_date or 'TBA' }}</td><td>{{ c.close_date or 'TBA' }}</td>
+        <td><span class="badge {{ 'bg-success' if c.status == 'Open' else 'bg-secondary' }}">{{ c.status }}</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <h5 class="fw-bold">Funding Opportunity Deadlines</h5>
+  <table class="table">
+    <thead><tr><th>Opportunity</th><th>Provider</th><th>Opens</th><th>Closes</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for o in opportunities %}
+      <tr>
+        <td><a href="{{ url_for('opportunity_detail', opp_id=o.id) }}">{{ o.title }}</a></td>
+        <td>{{ o.org_name }}</td>
+        <td>{{ o.open_date or 'TBA' }}</td>
+        <td>{{ o.close_date or 'TBA' }}</td>
+        <td>
+          {% if not o.is_open %}<span class="badge bg-secondary">Closed</span>
+          {% elif o.close_date and o.close_date < today %}<span class="badge bg-secondary">Closed</span>
+          {% else %}<span class="badge bg-success">Open</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

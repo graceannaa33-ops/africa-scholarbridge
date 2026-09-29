@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Visa Payment Settings — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3"><h2 class="fw-bold mb-1">Visa Payment Settings</h2><p class="mb-0 text-muted">Change the receiving M-PESA number and visa assistance fee without editing source code.</p></div>
+  {% include 'visa_admin/_nav.html' %}
+  <div class="card asb-card shadow-sm">
+    <div class="card-body p-4">
+      <form method="POST">\n        <input type="hidden" name="action" value="manual_payment">
+        <div class="mb-3">
+          <label class="form-label fw-semibold">M-PESA Receiving Number</label>
+          <input type="text" name="mpesa_receiving_number" class="form-control" value="{{ mpesa_receiving_number }}" placeholder="07XXXXXXXX" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold">Visa Application Fee (KSh)</label>
+          <input type="number" name="visa_application_fee" class="form-control" value="{{ visa_application_fee|int }}" min="1" step="1" required>
+        </div>
+        <button class="btn btn-primary fw-semibold">Save Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card asb-card shadow-sm mt-4">
+    <div class="card-body p-4">
+      <h5 class="fw-bold">Existing Country Pricing</h5>
+      <p class="small text-muted">The manual M-PESA fee above is the fee used for new manual visa requests. The existing country-pricing table is preserved for the rest of the visa module.</p>
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Country</th><th>Currency</th><th>Price</th><th>Active</th><th></th></tr></thead>
+          <tbody>
+          {% for row in pricing_rows %}
+            <tr>
+              <td>{{ row.country }}</td><td>{{ row.currency }}</td><td>{{ row.currency_symbol }} {{ row.service_price }}</td>
+              <td>{{ 'Yes' if row.active else 'No' }}</td>
+              <td><form method="POST" action="{{ url_for('visa_admin_settings_pricing_toggle', pricing_id=row.id) }}"><button class="btn btn-sm btn-outline-secondary">Toggle</button></form></td>
+            </tr>
+          {% else %}<tr><td colspan="5" class="text-muted">No country pricing records.</td></tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

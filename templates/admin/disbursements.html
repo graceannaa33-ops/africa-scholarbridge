@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Admin — Funding Disbursements{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">💰 Funding Disbursements</h2>
+  {% include 'admin/_nav.html' %}
+  <p class="text-muted small">
+    A payment is only ever marked <strong>PAID</strong> here, by a Main Admin, after a legitimate, authorized payment
+    process has actually confirmed it. This page never fabricates a payment status automatically.
+  </p>
+
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead><tr>
+        <th>Student</th><th>Application Ref.</th><th>Opportunity</th><th>Amount</th><th>Bank Info</th>
+        <th>Status</th><th>Reference</th><th>Date</th><th>Update</th>
+      </tr></thead>
+      <tbody>
+      {% for d in disbursements %}
+        <tr>
+          <td>{{ d.student_name }}</td>
+          <td class="small">{{ d.reference_number or '—' }}</td>
+          <td class="small">{{ d.opportunity_title or '—' }}</td>
+          <td class="small">{{ d.amount or '—' }} {{ d.currency or '' }}</td>
+          <td>
+            {% if d.payment_status == 'NOT_REQUIRED' %}
+              <span class="badge bg-secondary">Not Required</span>
+            {% elif d.bank_details_confirmed %}
+              <span class="badge bg-success">✓ Submitted</span>
+            {% else %}
+              <span class="badge bg-warning text-dark">Not Submitted</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="badge {{ 'bg-success' if d.payment_status == 'PAID' else 'bg-danger' if d.payment_status == 'FAILED' else 'bg-info text-dark' if d.payment_status in ['PROCESSING','APPROVED_FOR_PAYMENT'] else 'bg-warning text-dark' if d.payment_status in ['SUBMITTED','VERIFICATION_REQUIRED'] else 'bg-secondary' }}">
+              {{ d.payment_status.replace('_',' ') }}
+            </span>
+          </td>
+          <td class="small text-muted">{{ d.transaction_reference or '—' }}</td>
+          <td class="small text-muted">{{ d.payment_date or '—' }}</td>
+          <td style="min-width: 260px;">
+            <form method="POST" class="d-flex flex-column gap-1">
+              <input type="hidden" name="disbursement_id" value="{{ d.id }}">
+              <select name="payment_status" class="form-select form-select-sm">
+                {% for s in ['NOT_REQUIRED','NOT_SUBMITTED','SUBMITTED','VERIFICATION_REQUIRED','APPROVED_FOR_PAYMENT','PROCESSING','PAID','FAILED'] %}
+                <option value="{{ s }}" {{ 'selected' if d.payment_status == s }}>{{ s.replace('_',' ') }}</option>
+                {% endfor %}
+              </select>
+              <input type="text" name="transaction_reference" class="form-control form-control-sm" placeholder="Transaction reference" value="{{ d.transaction_reference or '' }}">
+              <input type="text" name="notes" class="form-control form-control-sm" placeholder="Internal note" value="{{ d.notes or '' }}">
+              <button type="submit" class="btn btn-sm btn-primary">Save</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="text-muted text-center py-3">No disbursement cases yet — these are created automatically when a Funded/Partially Funded decision is recorded.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

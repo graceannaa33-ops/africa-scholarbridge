@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Reports — Visa Admin{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <div class="asb-visa-admin-header mb-3">
+    <h2 class="fw-bold mb-1"><i class="bi bi-graph-up"></i> Visa Assistance Financial Summary</h2>
+    <p class="mb-0 text-muted">Visible only to authenticated Visa Admin accounts.</p>
+  </div>
+  {% include 'visa_admin/_nav.html' %}
+
+  <div class="alert alert-warning small mt-2">
+    <strong>Accounting separation:</strong> "Africa ScholarBridge Revenue" is money received FROM students
+    (service fee only). "Total Visa-Fee Expenditure" is money Africa ScholarBridge has paid OUT toward
+    the U.S. government's ${{ us_gov_fee }} fee on eligible students' behalf. These are never the same
+    transaction and are tracked in separate tables (<code>visa_payments</code> vs. <code>visa_fee_transactions</code>).
+  </div>
+
+  <div class="row g-3 my-2">
+    <div class="col-6 col-md-4">
+      <div class="card asb-visa-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Students Who Paid</p>
+        <h4 class="fw-bold mb-0">{{ paid_requests }}</h4>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-4">
+      <div class="card asb-visa-stat-card accent-green h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Africa ScholarBridge Revenue</p>
+        <h4 class="fw-bold mb-0">{{ format_usd(asb_revenue) }}</h4>
+        <p class="small text-muted mb-0">{{ paid_requests }} × {{ format_usd(student_fee) }}</p>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-4">
+      <div class="card asb-visa-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Eligible / Covered Applications</p>
+        <h4 class="fw-bold mb-0">{{ covered_requests }}</h4>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-4">
+      <div class="card asb-visa-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Visa Fees Actually Paid</p>
+        <h4 class="fw-bold mb-0">{{ fees_paid_count }}</h4>
+        <p class="small text-muted mb-0">{{ fees_paid_count }} × {{ format_usd(us_gov_fee) }}</p>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-4">
+      <div class="card asb-visa-stat-card accent-red h-100"><div class="card-body">
+        <p class="text-muted small mb-1">Total Visa-Fee Expenditure</p>
+        <h4 class="fw-bold mb-0">{{ format_usd(total_expenditure) }}</h4>
+      </div></div>
+    </div>
+    <div class="col-6 col-md-4">
+      <div class="card asb-visa-stat-card h-100" style="border-left-color: {{ 'var(--asb-green)' if net_margin >= 0 else 'var(--asb-visa-red)' }};">
+        <div class="card-body">
+        <p class="text-muted small mb-1">Net Service Margin</p>
+        <h4 class="fw-bold mb-0 {{ 'text-danger' if net_margin < 0 else '' }}">{{ format_usd(net_margin) }}</h4>
+        <p class="small text-muted mb-0">Revenue − visa-fee expenditure</p>
+      </div></div>
+    </div>
+  </div>
+
+  {% if net_margin < 0 %}
+  <div class="alert alert-danger small">
+    ⚠️ Net service margin is negative: Africa ScholarBridge has paid out more in U.S. government visa
+    fees than it has collected in service fees so far. This service fee alone (US${{ student_fee }} per
+    student) does not cover the US${{ us_gov_fee }} government fee per case - a sustainable operation
+    needs a separate funding source (grant, partner, capped sponsorship pool, eligibility limits, etc.).
+  </div>
+  {% endif %}
+
+  <div class="row g-4">
+    <div class="col-md-5">
+      <div class="card asb-card"><div class="card-body">
+        <h6 class="fw-bold">Requests by Coverage Status</h6>
+        <ul class="list-unstyled small mb-0">
+          {% for row in by_coverage_status %}
+          <li>{{ row.visa_fee_coverage_status }}: {{ row.c }}</li>
+          {% endfor %}
+        </ul>
+      </div></div>
+    </div>
+    <div class="col-md-7">
+      <div class="table-responsive">
+        <table class="table table-sm">
+          <thead><tr><th>Reference</th><th>Student</th><th>Service Fee</th><th>Payment</th><th>Fee Coverage</th></tr></thead>
+          <tbody>
+          {% for r in requests_rows %}
+            <tr>
+              <td>{{ r.request_number }}</td>
+              <td>{{ r.student_name }}</td>
+              <td>{{ r.currency }} {{ r.service_price }}</td>
+              <td><span class="badge {{ 'bg-success' if r.payment_status == 'paid' else 'bg-secondary' }}">{{ r.payment_status }}</span></td>
+              <td><span class="badge bg-info text-dark">{{ r.visa_fee_coverage_status }}</span></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

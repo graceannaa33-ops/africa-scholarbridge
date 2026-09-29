@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Contact — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-5">
+  <div class="row justify-content-center">
+    <div class="col-lg-6">
+      <h2 class="fw-bold mb-3">Contact Us</h2>
+      <p class="text-muted mb-4">Have a question, need application help, or want to report a scam? Send us a message.</p>
+      <div class="card asb-card shadow-sm">
+        <div class="card-body p-4">
+          <form method="POST">
+            <div class="mb-3"><label class="form-label">Name</label><input type="text" name="name" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">Email</label><input type="email" name="email" class="form-control" required></div>
+            <div class="mb-3">
+              <label class="form-label">Category</label>
+              <select name="category" class="form-select">
+                <option>General Question</option>
+                <option>Application Help</option>
+                <option>Funding Opportunity</option>
+                <option>Technical Problem</option>
+                <option>Scam Report</option>
+                <option>Partnership Inquiry</option>
+              </select>
+            </div>
+            <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject" class="form-control"></div>
+            <div class="mb-3"><label class="form-label">Message</label><textarea name="message" class="form-control" rows="4" required></textarea></div>
+            <button type="submit" class="btn btn-primary w-100 fw-semibold">Send Message</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

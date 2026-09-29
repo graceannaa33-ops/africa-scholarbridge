@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1"><i class="bi bi-shield-lock"></i> Admin Dashboard</h2>
+  <p class="text-muted mb-4">Current Cycle: <strong>{{ cycle.name if cycle else 'No active cycle' }}</strong></p>
+
+  {% include 'admin/_nav.html' %}
+
+  <div class="card border-warning mb-3">
+    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div>
+        <h5 class="fw-bold mb-1">💳 Visa Payments (M-PESA)</h5>
+        <p class="mb-0 small">{{ visa_payments_pending }} payment(s) awaiting verification. Verify or reject them in the
+          <strong>Visa Admin portal → Visa Payments</strong> (separate Visa Admin login: <code>/visa-admin/login</code>).</p>
+      </div>
+      <a href="{{ url_for('visa_admin_payments') }}" class="btn btn-warning fw-semibold">Open Visa Payments &rarr;</a>
+    </div>
+  </div>
+
+  <div class="row g-3 my-2">
+    {% for label, value in [
+        ('Total Students', stats.students), ('Applications', stats.applications), ('Under Review', stats.under_review),
+        ('Funding Matches', stats.matches), ('Provider Referrals', stats.referrals), ('Funded Students', stats.funded),
+        ('Pending Decisions', stats.pending_decisions), ('Active Opportunities', stats.opportunities)] %}
+    <div class="col-6 col-md-3">
+      <div class="card asb-stat-card h-100"><div class="card-body">
+        <p class="text-muted small mb-1">{{ label }}</p>
+        <h4 class="fw-bold mb-0">{{ value }}</h4>
+      </div></div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="row g-4 mt-2">
+    <div class="col-lg-7">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Recent Applications</h5>
+          <table class="table table-sm">
+            <thead><tr><th>Student</th><th>Reference</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            {% for a in recent_applications %}
+              <tr>
+                <td>{{ a.full_name }}</td>
+                <td>{{ a.reference_number or '—' }}</td>
+                <td><span class="badge bg-info text-dark">{{ a.status }}</span></td>
+                <td><a href="{{ url_for('admin_application_detail', application_id=a.id) }}" class="btn btn-sm btn-outline-primary">View</a></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-5">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">Upcoming Deadlines</h5>
+          <ul class="list-group list-group-flush">
+          {% for o in upcoming %}
+            <li class="list-group-item">{{ o.title }} <span class="text-muted small">({{ o.org_name }})</span><div class="small text-muted">Closes {{ o.close_date or 'TBA' }}</div></li>
+          {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="text-center small text-muted mt-4 mb-0">Africa ScholarBridge — {{ app_version }}</p>
+</div>
+{% endblock %}

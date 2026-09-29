@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{% if search_query %}Search results for {{ search_query }}{% else %}Find Funding{% endif %} — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  {% if search_query %}
+    <h2 class="fw-bold mb-1">Search results for "{{ search_query }}"</h2>
+  {% else %}
+    <h2 class="fw-bold mb-1">Explore Funding Opportunities</h2>
+  {% endif %}
+  <p class="text-muted mb-4">Search and filter scholarships, grants, fellowships, sponsorships, and bursaries.</p>
+
+  <form method="GET" class="card asb-card shadow-sm p-3 mb-4" role="search">
+    <div class="row g-2">
+      <div class="col-12 col-md-4">
+        <input type="text" name="q" class="form-control" placeholder="🔍 Search scholarships, sponsors, grants, bursaries..." value="{{ filters.get('q','') }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <input type="text" name="country" class="form-control" placeholder="Country" value="{{ filters.get('country','') }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <select name="level" class="form-select">
+          <option value="">Education Level</option>
+          {% for lvl in ['Undergraduate', "Master's", 'PhD', 'Diploma', 'Certificate', 'TVET', 'Vocational/Technical', 'High School'] %}
+          <option {{ 'selected' if filters.get('level') == lvl }}>{{ lvl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <select name="funding_type" class="form-select">
+          <option value="">Funding Type</option>
+          {% for t in funding_types %}
+          <option {{ 'selected' if filters.get('funding_type') == t }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <select name="status" class="form-select">
+          <option value="">Any Status</option>
+          <option value="open" {{ 'selected' if filters.get('status') == 'open' }}>Open</option>
+          <option value="closed" {{ 'selected' if filters.get('status') == 'closed' }}>Closed</option>
+        </select>
+      </div>
+      <div class="col-6 col-md-2">
+        <input type="text" name="field" class="form-control" placeholder="Field of study" value="{{ filters.get('field','') }}">
+      </div>
+      <div class="col-6 col-md-2">
+        <input type="text" name="destination" class="form-control" placeholder="Study destination" value="{{ filters.get('destination','') }}">
+      </div>
+      <div class="col-6 col-md-2 form-check d-flex align-items-center ms-1">
+        <input class="form-check-input me-2" type="checkbox" name="fully_funded" value="1" id="ff" {{ 'checked' if filters.get('fully_funded') == '1' }}>
+        <label class="form-check-label" for="ff">Fully Funded Only</label>
+      </div>
+      <div class="col-12 col-md-2"><button type="submit" class="btn btn-primary w-100">Search</button></div>
+    </div>
+  </form>
+
+  <p class="text-muted">{{ opportunities|length }} opportunit{{ 'y' if opportunities|length == 1 else 'ies' }} found</p>
+
+  {% if opportunities %}
+  <div class="row g-4">
+    {% for opp in opportunities %}
+    <div class="col-12 col-md-6 col-lg-4">
+      <div class="card asb-card h-100 shadow-sm">
+        <div class="card-body d-flex flex-column">
+          <div class="d-flex justify-content-between flex-wrap gap-1">
+            <span class="badge asb-badge-type mb-2">{{ opp.funding_type }}</span>
+            <span class="badge {{ 'bg-success' if opp.is_open else 'bg-secondary' }}">{{ 'Open' if opp.is_open else 'Closed' }}</span>
+          </div>
+          <h5 class="fw-semibold">{{ opp.title }}</h5>
+          <p class="text-muted small mb-1"><i class="bi bi-building"></i> {{ opp.org_name }}</p>
+          <p class="small mb-1"><strong>Country:</strong> {{ opp.eligible_countries or 'All' }}</p>
+          <p class="small mb-1"><strong>Study Level:</strong> {{ opp.education_levels or 'All levels' }}</p>
+          <p class="small mb-1"><strong>Field:</strong> {{ opp.fields or 'All fields' }}</p>
+          <p class="small mb-1"><strong>Funding Coverage:</strong> {{ opp.coverage or opp.amount or 'Varies' }}</p>
+          <p class="small mb-2"><strong>Deadline:</strong> {{ opp.close_date or 'TBA' }}</p>
+          <p class="text-muted small flex-grow-1">{{ (opp.eligibility_notes or opp.description or '')[:110] }}{% if (opp.eligibility_notes or opp.description or '')|length > 110 %}...{% endif %}</p>
+          <div class="d-flex justify-content-between align-items-center small mb-2">
+            <span class="badge {{ 'bg-success' if opp.verification_status == 'Verified' else 'bg-warning text-dark' }}">{{ opp.verification_status }}</span>
+            <span class="text-muted">Last verified: {{ opp.last_verified_date or '—' }}</span>
+          </div>
+          <div class="d-flex gap-2 flex-wrap mt-auto">
+            <a href="{{ url_for('opportunity_detail', opp_id=opp.id) }}" class="btn btn-sm btn-primary">View Details</a>
+            {% if opp.application_url %}
+            <a href="{{ opp.application_url }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">Official Application</a>
+            {% endif %}
+            {% if logged_in_student %}
+            <form method="POST" action="{{ url_for('opportunity_toggle_save', opp_id=opp.id) }}">
+              <button type="submit" class="btn btn-sm {{ 'btn-warning' if opp.id in saved_ids else 'btn-outline-warning' }}">
+                {{ '★ Saved' if opp.id in saved_ids else '☆ Save' }}
+              </button>
+            </form>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="text-center py-5">
+    <p class="fs-4 mb-2">🔍 No matching opportunities found.</p>
+    <p class="text-muted mb-4">Try another keyword or adjust your filters.</p>
+    <div class="d-flex justify-content-center gap-2 flex-wrap">
+      <a href="{{ url_for('funding') }}" class="btn btn-outline-secondary">Clear Search</a>
+      <a href="{{ url_for('funding') }}" class="btn btn-primary">Browse All Opportunities</a>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

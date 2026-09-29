@@ -1,0 +1,15 @@
+# Never commit secrets, local environments or runtime data
+.env
+instance/
+venv/
+.venv/
+__pycache__/
+*.pyc
+database/.flask_secret_key
+*.init.lock
+uploads/payment_proofs/*
+uploads/visa_documents/*
+
+# NOTE: templates/ and static/ MUST be committed - the site cannot start
+# without them (TemplateNotFound on Render).
+database/*.db

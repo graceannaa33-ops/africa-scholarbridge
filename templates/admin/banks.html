@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Admin — Bank Directory{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-3">🏦 Bank Directory</h2>
+  {% include 'admin/_nav.html' %}
+  <p class="text-muted small">
+    Every "Licensed" bank here must be verified against the country's official banking regulator (for Kenya, the
+    Central Bank of Kenya) before being shown to students. Only the Main Admin can manage this directory - students
+    can only browse and select from it.
+  </p>
+
+  <div class="row g-4">
+    <div class="col-lg-4">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold">Add Bank</h5>
+          <form method="POST">
+            <input type="hidden" name="action" value="add">
+            <div class="mb-2"><label class="form-label">Country</label>
+              <select name="country" class="form-select" required>
+                <option value="">Select country…</option>
+                {% for c in countries %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="mb-2"><label class="form-label">Bank Name</label><input type="text" name="bank_name" class="form-control" required></div>
+            <div class="mb-2"><label class="form-label">Bank Code</label><input type="text" name="bank_code" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">SWIFT/BIC</label><input type="text" name="swift_bic" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">Website</label><input type="url" name="website" class="form-control"></div>
+            <div class="mb-2"><label class="form-label">Status</label>
+              <select name="status" class="form-select">
+                {% for s in status_choices %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Add Bank</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-8">
+      <div class="card asb-card">
+        <div class="card-body">
+          <h5 class="fw-bold mb-3">All Banks</h5>
+          <form method="GET" class="row g-2 mb-3">
+            <div class="col-md-5">
+              <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="Search bank name, code, or SWIFT/BIC…">
+            </div>
+            <div class="col-md-5">
+              <select name="country" class="form-select form-select-sm">
+                <option value="">All Countries</option>
+                {% for c in countries %}<option value="{{ c }}" {{ 'selected' if c == country_filter }}>{{ c }}</option>{% endfor %}
+              </select>
+            </div>
+            <div class="col-md-2"><button class="btn btn-sm btn-outline-primary w-100">Filter</button></div>
+          </form>
+
+          <div class="table-responsive">
+            <table class="table table-sm table-hover">
+              <thead><tr><th>Bank</th><th>Country</th><th>Code</th><th>SWIFT</th><th>Status</th><th>Last Verified</th><th></th></tr></thead>
+              <tbody>
+              {% for b in banks %}
+                <tr>
+                  <td>{{ b.bank_name }} {% if not b.is_active %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+                  <td class="small">{{ b.country }}</td>
+                  <td class="small">{{ b.bank_code or '—' }}</td>
+                  <td class="small">{{ b.swift_bic or '—' }}</td>
+                  <td><span class="badge {{ 'bg-success' if b.status == 'Licensed' else 'bg-warning text-dark' }}">{{ b.status }}</span></td>
+                  <td class="small text-muted">{{ b.last_verified or '—' }}</td>
+                  <td>
+                    <div class="d-flex gap-1 flex-wrap" style="min-width: 220px;">
+                      <form method="POST"><input type="hidden" name="action" value="verify"><input type="hidden" name="bank_id" value="{{ b.id }}">
+                        <button class="btn btn-sm btn-outline-success">Verify Today</button></form>
+                      <form method="POST"><input type="hidden" name="action" value="toggle_active"><input type="hidden" name="bank_id" value="{{ b.id }}">
+                        <button class="btn btn-sm btn-outline-secondary">{{ 'Deactivate' if b.is_active else 'Activate' }}</button></form>
+                      <form method="POST" onsubmit="return confirm('Remove this bank from the directory?');">
+                        <input type="hidden" name="action" value="remove"><input type="hidden" name="bank_id" value="{{ b.id }}">
+                        <button class="btn btn-sm btn-outline-danger">Remove</button></form>
+                    </div>
+                  </td>
+                </tr>
+              {% else %}
+                <tr><td colspan="7" class="text-muted text-center py-3">No banks match your search.</td></tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

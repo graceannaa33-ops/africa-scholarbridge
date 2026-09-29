@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Annual Funding Application — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+
+  <h2 class="fw-bold mb-1">Annual Funding Application</h2>
+  <p class="text-muted mb-4">Step {{ step_index + 1 }} of {{ steps|length }}</p>
+
+  <div class="progress mb-4" style="height: 8px;">
+    <div class="progress-bar bg-success" role="progressbar"
+         style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
+  </div>
+
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <div class="card asb-card shadow-sm">
+        <div class="card-body p-4 p-md-5">
+          <form method="POST">
+
+            {% if step_name == 'personal' %}
+              <h4 class="fw-bold mb-3">Step 1 — Personal Information</h4>
+              <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">Full Name</label>
+                  <input type="text" name="full_name" class="form-control" value="{{ application.full_name or '' }}" required></div>
+                <div class="col-md-6"><label class="form-label">Date of Birth</label>
+                  <input type="date" name="date_of_birth" class="form-control" value="{{ application.date_of_birth or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Country</label>
+                  <input type="text" name="country" class="form-control" value="{{ application.country or '' }}" required></div>
+                <div class="col-md-6"><label class="form-label">Citizenship</label>
+                  <input type="text" name="citizenship" class="form-control" value="{{ application.citizenship or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Phone</label>
+                  <input type="text" name="phone" class="form-control" value="{{ application.phone or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Email</label>
+                  <input type="email" name="email" class="form-control" value="{{ application.email or '' }}" required></div>
+                <div class="col-md-6"><label class="form-label">Gender (optional)</label>
+                  <select name="gender" class="form-select">
+                    <option value="" {{ 'selected' if not application.gender }}>Prefer not to say</option>
+                    <option {{ 'selected' if application.gender == 'Female' }}>Female</option>
+                    <option {{ 'selected' if application.gender == 'Male' }}>Male</option>
+                    <option {{ 'selected' if application.gender == 'Other' }}>Other</option>
+                  </select></div>
+              </div>
+
+            {% elif step_name == 'education' %}
+              <h4 class="fw-bold mb-3">Step 2 — Education</h4>
+              <div class="row g-3">
+                <div class="col-md-6"><label class="form-label">Institution</label>
+                  <input type="text" name="institution" class="form-control" value="{{ application.institution or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Education Level</label>
+                  <select name="education_level" class="form-select">
+                    {% for lvl in ['Undergraduate', "Master's", 'PhD', 'Vocational/Technical', 'High School'] %}
+                    <option {{ 'selected' if application.education_level == lvl }}>{{ lvl }}</option>
+                    {% endfor %}
+                  </select></div>
+                <div class="col-md-6"><label class="form-label">Course</label>
+                  <input type="text" name="course" class="form-control" value="{{ application.course or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Field of Study</label>
+                  <input type="text" name="field_of_study" class="form-control" value="{{ application.field_of_study or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Year of Study</label>
+                  <input type="text" name="year_of_study" class="form-control" value="{{ application.year_of_study or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Expected Graduation Year</label>
+                  <input type="text" name="graduation_year" class="form-control" value="{{ application.graduation_year or '' }}"></div>
+                <div class="col-12"><label class="form-label">Additional Academic Information</label>
+                  <textarea name="academic_info" class="form-control" rows="2">{{ application.academic_info or '' }}</textarea></div>
+              </div>
+
+            {% elif step_name == 'funding_need' %}
+              <h4 class="fw-bold mb-3">Step 3 — Funding Need</h4>
+              <div class="row g-3">
+                <div class="col-12"><label class="form-label">Funding Type Needed</label>
+                  <input type="text" name="funding_type_needed" class="form-control" value="{{ application.funding_type_needed or '' }}" placeholder="e.g. Full tuition, partial support"></div>
+                {% for f, label in [('tuition_need','Tuition'), ('accommodation_need','Accommodation'), ('living_expenses_need','Living Expenses'),
+                                     ('books_need','Books'), ('transport_need','Transport'), ('technology_need','Technology')] %}
+                <div class="col-md-4">
+                  <label class="form-label">{{ label }}</label>
+                  <select name="{{ f }}" class="form-select">
+                    <option value="Not Needed" {{ 'selected' if application[f] == 'Not Needed' }}>Not Needed</option>
+                    <option value="Partial" {{ 'selected' if application[f] == 'Partial' }}>Partial</option>
+                    <option value="Full" {{ 'selected' if application[f] == 'Full' }}>Full</option>
+                  </select>
+                </div>
+                {% endfor %}
+                <div class="col-12"><label class="form-label">Other Education Expenses</label>
+                  <textarea name="other_expenses" class="form-control" rows="2">{{ application.other_expenses or '' }}</textarea></div>
+              </div>
+
+            {% elif step_name == 'financial' %}
+              <h4 class="fw-bold mb-3">Step 4 — Financial Information</h4>
+              <div class="row g-3">
+                <div class="col-12"><label class="form-label">Household Financial Situation</label>
+                  <textarea name="household_situation" class="form-control" rows="2">{{ application.household_situation or '' }}</textarea></div>
+                <div class="col-md-6"><label class="form-label">Source of Support</label>
+                  <input type="text" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}"></div>
+                <div class="col-md-6"><label class="form-label">Estimated Financial Need</label>
+                  <input type="text" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. USD 3,000 / year"></div>
+                <div class="col-12"><label class="form-label">Funding Already Received (if any)</label>
+                  <textarea name="funding_already_received" class="form-control" rows="2">{{ application.funding_already_received or '' }}</textarea></div>
+              </div>
+
+            {% elif step_name == 'preferences' %}
+              <h4 class="fw-bold mb-3">Step 5 — Funding Preferences</h4>
+              <p class="text-muted">Select everything that applies to your funding search.</p>
+              {% set current_prefs = (application.preferences or '').split(', ') %}
+              <div class="row g-2">
+                {% for pref in ['Local Study', 'International Study', 'Undergraduate', "Master's", 'PhD',
+                                'Vocational/Technical Education', 'Research', 'Fellowship', 'Scholarship',
+                                'Grant', 'Sponsorship'] %}
+                <div class="col-md-4">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="preferences" value="{{ pref }}"
+                           id="pref-{{ loop.index }}" {{ 'checked' if pref in current_prefs }}>
+                    <label class="form-check-label" for="pref-{{ loop.index }}">{{ pref }}</label>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+
+            {% elif step_name == 'statement' %}
+              <h4 class="fw-bold mb-3">Step 6 — Personal Statement</h4>
+              <p class="text-muted">Tell us about your educational goals, financial need, career goals, and why funding matters to you and your community.</p>
+              <textarea name="personal_statement" class="form-control" rows="10" placeholder="Write your personal statement here...">{{ application.personal_statement or '' }}</textarea>
+
+            {% elif step_name == 'documents' %}
+              <h4 class="fw-bold mb-3">Step 7 — Documents</h4>
+              <p class="text-muted">Here is the document checklist for your application. You can upload these now or later from the Documents page.</p>
+              <ul class="list-group mb-3">
+                {% for d in documents %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                  {{ d.document_type }} {% if d.is_required %}<span class="badge bg-danger ms-1">Required</span>{% else %}<span class="badge bg-secondary ms-1">Optional</span>{% endif %}
+                  <span class="badge {{ 'bg-success' if d.status != 'Missing' else 'bg-warning text-dark' }}">{{ d.status }}</span>
+                </li>
+                {% endfor %}
+              </ul>
+              <a href="{{ url_for('documents') }}" class="btn btn-sm btn-outline-primary">Manage Documents</a>
+
+            {% elif step_name == 'review' %}
+              <h4 class="fw-bold mb-3">Step 8 — Review Your Application</h4>
+              <p class="text-muted">Please review your information below before submitting.</p>
+              <table class="table table-sm">
+                <tr><th>Full Name</th><td>{{ application.full_name }}</td></tr>
+                <tr><th>Country</th><td>{{ application.country }}</td></tr>
+                <tr><th>Institution</th><td>{{ application.institution }}</td></tr>
+                <tr><th>Education Level</th><td>{{ application.education_level }}</td></tr>
+                <tr><th>Field of Study</th><td>{{ application.field_of_study }}</td></tr>
+                <tr><th>Funding Type Needed</th><td>{{ application.funding_type_needed }}</td></tr>
+                <tr><th>Estimated Financial Need</th><td>{{ application.estimated_financial_need }}</td></tr>
+                <tr><th>🇺🇸 Visa Requirement</th>
+                  <td>
+                    {% if application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}
+                      <span class="badge bg-success">✓ Complete - Visa Document Uploaded</span>
+                    {% elif application.visa_step_status == 'COMPLETE' %}
+                      <span class="badge bg-success">✓ Complete - Visa Assistance Paid</span>
+                    {% elif application.visa_step_status == 'NOT_REQUIRED' %}
+                      <span class="badge bg-success">✓ Already Has Visa Arrangements</span>
+                    {% elif application.visa_step_status == 'ACTION_REQUIRED' %}
+                      <span class="badge bg-warning text-dark">⚠ Action Required</span>
+                    {% else %}
+                      <span class="badge bg-secondary">Not yet answered</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr><th>🏦 Funding Payment Information</th>
+                  <td>
+                    {% if application.bank_step_status == 'COMPLETE' %}
+                      <span class="badge bg-success">✓ Complete - Payment Information Submitted</span>
+                    {% elif application.bank_step_status == 'NOT_REQUIRED' %}
+                      <span class="badge bg-success">✓ Not Required for Your Matches</span>
+                    {% elif application.bank_step_status == 'ACTION_REQUIRED' %}
+                      <span class="badge bg-warning text-dark">⚠ Action Required</span>
+                    {% else %}
+                      <span class="badge bg-secondary">Not yet reached</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                <tr><th>Preferences</th><td>{{ application.preferences }}</td></tr>
+                <tr><th>Personal Statement</th><td>{{ (application.personal_statement or '')[:200] }}...</td></tr>
+              </table>
+              <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" required id="confirm">
+                <label class="form-check-label" for="confirm">I confirm that the information provided is accurate and complete.</label>
+              </div>
+            {% endif %}
+
+            <div class="d-flex justify-content-between mt-4">
+              {% if step_index > 0 %}
+                <a href="{{ url_for('application_step', step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">&larr; Back</a>
+              {% else %}
+                <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
+              {% endif %}
+              <button type="submit" class="btn btn-primary fw-semibold">
+                {{ 'Continue to Submit' if step_name == 'review' else 'Save &amp; Continue' }} &rarr;
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

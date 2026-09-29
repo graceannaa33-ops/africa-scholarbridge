@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Application Tracker — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">Application Tracker</h2>
+  <p class="text-muted mb-4">Follow your application's journey from submission to funding decision.</p>
+
+  {% if not application %}
+    <div class="alert alert-info">You haven't started an application yet. <a href="{{ url_for('application_start') }}">Start now</a>.</div>
+  {% else %}
+  <div class="card asb-card shadow-sm mb-4">
+    <div class="card-body">
+      <div class="asb-tracker">
+        {% for step in steps %}
+        <div class="asb-tracker-step {{ 'done' if loop.index0 < current_step else 'active' if loop.index0 == current_step else '' }}">
+          <div class="asb-tracker-dot">
+            {% if loop.index0 < current_step %}<i class="bi bi-check"></i>{% elif loop.index0 == current_step %}●{% else %}○{% endif %}
+          </div>
+          <div class="asb-tracker-label">{{ step }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card asb-card shadow-sm">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">Provider Referrals</h5>
+      {% if referrals %}
+      <table class="table">
+        <thead><tr><th>Opportunity</th><th>Referral Status</th><th>Decision</th><th>Amount</th></tr></thead>
+        <tbody>
+        {% for r in referrals %}
+          <tr>
+            <td>{{ r.title }}</td>
+            <td><span class="badge bg-info text-dark">{{ r.status }}</span></td>
+            <td>{{ r.decision or 'Pending' }}</td>
+            <td>{{ r.funding_amount or '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-muted mb-0">No provider referrals yet. Proceed with a match from your <a href="{{ url_for('matches') }}">Funding Matches</a> page.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

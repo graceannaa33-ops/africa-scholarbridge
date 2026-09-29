@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Africa ScholarBridge{% endblock %}</title>
+    <meta name="description" content="One Application. Multiple Funding Opportunities. One Annual Cycle.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎓</text></svg>">
+    <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg navbar-dark asb-navbar sticky-top">
+  <div class="container">
+    <a class="navbar-brand fw-bold" href="{{ url_for('index') }}">
+      <span class="asb-logo">🎓</span> Africa <span class="text-warning">ScholarBridge</span>
+    </a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navMain">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('index') }}">Home</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('opportunities') }}">Find Funding</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('providers') }}">Providers</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('calendar_page') }}">Calendar</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('guides') }}">Guides</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('scam_alerts') }}">Scam Alerts</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('student_visa_landing') }}">🇺🇸 Student Visa</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('about') }}">About</a></li>
+        <li class="nav-item"><a class="nav-link" href="{{ url_for('contact') }}">Contact</a></li>
+      </ul>
+      <ul class="navbar-nav">
+        {% if logged_in_student %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('dashboard') }}"><i class="bi bi-speedometer2"></i> My Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('student_applications') }}">My Applications</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('student_visa_dashboard') }}">My Visa Request</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('logout') }}">Logout</a></li>
+        {% elif logged_in_admin %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_dashboard') }}"><i class="bi bi-shield-lock"></i> Admin Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('admin_logout') }}">Logout</a></li>
+        {% elif logged_in_visa_admin %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('visa_admin_dashboard') }}"><i class="bi bi-shield-lock"></i> 🇺🇸 Visa Admin Dashboard</a></li>
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('visa_admin_logout') }}">Logout</a></li>
+        {% else %}
+          <li class="nav-item"><a class="nav-link" href="{{ url_for('login') }}">Log In</a></li>
+          <li class="nav-item">
+            <a class="btn btn-warning btn-sm ms-lg-2 fw-semibold" href="{{ url_for('register') }}">Start My Application</a>
+          </li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<div class="container mt-3">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ 'danger' if category == 'danger' else category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
+
+<main>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="asb-footer mt-5">
+  <div class="container py-5">
+    <div class="row g-4">
+      <div class="col-md-4">
+        <h5 class="fw-bold"><span class="asb-logo">🎓</span> Africa ScholarBridge</h5>
+        <p class="text-light-emphasis">One Application. Multiple Funding Opportunities. One Annual Cycle.</p>
+      </div>
+      <div class="col-md-4">
+        <h6 class="fw-bold text-warning">Explore</h6>
+        <ul class="list-unstyled">
+          <li><a href="{{ url_for('about') }}">About</a></li>
+          <li><a href="{{ url_for('index') }}#how-it-works">How It Works</a></li>
+          <li><a href="{{ url_for('opportunities') }}">Funding</a></li>
+          <li><a href="{{ url_for('guides') }}">Guides</a></li>
+          <li><a href="{{ url_for('scam_alerts') }}">Scam Alerts</a></li>
+        </ul>
+      </div>
+      <div class="col-md-4">
+        <h6 class="fw-bold text-warning">Company</h6>
+        <ul class="list-unstyled">
+          <li><a href="{{ url_for('contact') }}">Contact</a></li>
+          <li><a href="{{ url_for('privacy') }}">Privacy Policy</a></li>
+          <li><a href="{{ url_for('terms') }}">Terms of Use</a></li>
+          <li><a href="{{ url_for('admin_login') }}">Admin Login</a></li>
+        </ul>
+        <div class="mt-2">
+          <a href="#" class="text-light me-3"><i class="bi bi-facebook"></i></a>
+          <a href="#" class="text-light me-3"><i class="bi bi-twitter-x"></i></a>
+          <a href="#" class="text-light me-3"><i class="bi bi-instagram"></i></a>
+          <a href="#" class="text-light"><i class="bi bi-linkedin"></i></a>
+        </div>
+      </div>
+    </div>
+    <hr class="border-secondary">
+    <p class="text-center text-light-emphasis mb-0 small">&copy; {{ now.year }} Africa ScholarBridge. All rights reserved. Demonstration platform for educational purposes.</p>
+    <p class="text-center text-light-emphasis mb-0 small opacity-75" id="asb-build">Africa ScholarBridge — {{ app_version }}</p>
+  </div>
+</footer>
+
+<script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

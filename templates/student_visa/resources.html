@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Official U.S. Resources — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">🇺🇸 Official U.S. Government Resources</h2>
+  <p class="text-muted mb-4">Africa ScholarBridge treats these official sources as authoritative for anything related to student visas, fees, and requirements.</p>
+
+  <div class="row g-3">
+    <div class="col-md-6">
+      <div class="card asb-card h-100"><div class="card-body">
+        <h6 class="fw-bold">Student Visas</h6>
+        <p class="small text-muted">U.S. Department of State — Bureau of Consular Affairs, student visa overview (F, M, J categories).</p>
+        <a href="https://travel.state.gov/content/travel/en/us-visas/study.html" target="_blank" rel="noopener">travel.state.gov — Student Visa</a>
+      </div></div>
+    </div>
+    <div class="col-md-6">
+      <div class="card asb-card h-100"><div class="card-body">
+        <h6 class="fw-bold">Visa Fees</h6>
+        <p class="small text-muted">Current MRV application fee (referenced in this platform as US${{ us_gov_fee }} — verify the live figure).</p>
+        <a href="https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/fees/fees-visa-services.html" target="_blank" rel="noopener">travel.state.gov — Visa Fees</a>
+      </div></div>
+    </div>
+    <div class="col-md-6">
+      <div class="card asb-card h-100"><div class="card-body">
+        <h6 class="fw-bold">Country-Specific Information</h6>
+        <p class="small text-muted">Requirements, appointment wait times, and document lists vary by country.</p>
+        <a href="https://travel.state.gov/content/travel/en/us-visas/visa-information-resources/visa-wait-times.html" target="_blank" rel="noopener">travel.state.gov — Visa Wait Times</a>
+      </div></div>
+    </div>
+    <div class="col-md-6">
+      <div class="card asb-card h-100"><div class="card-body">
+        <h6 class="fw-bold">Embassy / Consular Information</h6>
+        <p class="small text-muted">Find your nearest U.S. embassy or consulate for appointments and updates.</p>
+        <a href="https://www.usembassy.gov/" target="_blank" rel="noopener">usembassy.gov</a>
+      </div></div>
+    </div>
+    <div class="col-md-6">
+      <div class="card asb-card h-100"><div class="card-body">
+        <h6 class="fw-bold">SEVP / Study in the States</h6>
+        <p class="small text-muted">Official guidance on F-1/M-1 student status, SEVIS, and Form I-20.</p>
+        <a href="https://studyinthestates.dhs.gov/" target="_blank" rel="noopener">studyinthestates.dhs.gov</a>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="alert alert-info mt-4 small">
+    Requirements and fees can change. Always confirm current details on the official sites above before
+    making decisions or payments.
+  </div>
+</div>
+{% endblock %}
