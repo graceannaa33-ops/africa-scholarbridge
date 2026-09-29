@@ -28,6 +28,11 @@
             <span class="badge {{ 'bg-success' if u.visa_document_status == 'UPLOADED' else 'bg-secondary' }}">
               {{ u.visa_document_status }}
             </span>
+            {% if u.visa_verification_status == 'VERIFIED' %}
+              <span class="badge bg-success">Verified automatically</span>
+            {% elif u.visa_verification_status %}
+              <span class="badge bg-danger">{{ u.visa_verification_status }}</span>
+            {% endif %}
           </td>
           <td class="small text-muted">{{ u.visa_document_uploaded_at or '—' }}</td>
           <td>

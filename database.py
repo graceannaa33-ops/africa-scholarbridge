@@ -989,6 +989,22 @@ def _init_db():
         WHERE mpesa_transaction_code IS NOT NULL AND payment_status != 'PAYMENT_REJECTED'
     """)
 
+    # ---------------------------------------------------------------
+    # AUTOMATIC VISA VERIFICATION RESULT ("Yes, I have my visa" path).
+    # A visa step on that path only counts as passed when
+    # visa_verification_status = 'VERIFIED' (see visa_verification.py).
+    # FAILED rows keep the reasons for the admin to see; there is no
+    # manual approval step.
+    # ---------------------------------------------------------------
+    existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(funding_applications)").fetchall()}
+    for col, definition in {
+        "visa_verification_status": "TEXT",   # NULL | 'VERIFIED' | 'FAILED'
+        "visa_verification_notes": "TEXT",    # reasons for the last automatic decision
+        "visa_verified_at": "TEXT",
+    }.items():
+        if col not in existing_cols:
+            _add_column(cur, "funding_applications", col, definition)
+
     ensure_reference_data(cur)
 
     conn.commit()

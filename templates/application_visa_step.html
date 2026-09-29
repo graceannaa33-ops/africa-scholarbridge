@@ -47,7 +47,14 @@
             {% endif %}
 
             <h4 class="fw-bold mb-3">📄 Upload Your U.S. Student Visa</h4>
-            <p class="mb-4">Please upload a clear copy of your U.S. student visa so Africa ScholarBridge can record it as part of your annual funding application.</p>
+            <p class="mb-3">Your visa is checked <strong>automatically</strong> against the details below and against the document itself. It is only accepted if every check passes.</p>
+            <div class="alert alert-warning small mb-4">
+              <strong>Upload a searchable PDF scan of your U.S. visa page</strong> (for example from Adobe Scan or
+              Microsoft Lens) that clearly shows the two machine-readable lines with <code>&lt;&lt;&lt;</code> characters at
+              the bottom of the visa. The name and date of birth on the visa must match your application.
+              If your visa can't be verified - including a photo or scan the system can't read - you'll be moved to
+              Africa ScholarBridge visa assistance and your application details will be kept.
+            </div>
 
             <form method="POST" action="{{ url_for('application_visa_document_upload') }}" enctype="multipart/form-data" id="visaUploadForm">
               <div class="mb-3">
@@ -70,7 +77,7 @@
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
                   <label class="form-label">Visa type / category <span class="text-danger">*</span></label>
-                  <input type="text" name="visa_type_category" class="form-control" placeholder="e.g. F-1, J-1"
+                  <input type="text" name="visa_type_category" class="form-control" placeholder="F-1, J-1 or M-1"
                          value="{{ application.visa_document_type or '' }}" maxlength="30" required>
                 </div>
                 <div class="col-md-6">
@@ -79,9 +86,9 @@
                          value="{{ application.visa_document_passport_number or '' }}" maxlength="20" required>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">Visa issue date <span class="text-muted small">(if available)</span></label>
+                  <label class="form-label">Visa issue date <span class="text-danger">*</span></label>
                   <input type="date" name="visa_issue_date" class="form-control"
-                         value="{{ application.visa_document_issue_date or '' }}">
+                         value="{{ application.visa_document_issue_date or '' }}" required>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Visa expiry date <span class="text-danger">*</span></label>
@@ -99,7 +106,7 @@
                 ScholarBridge staff. It is never made available at a public link.
               </div>
 
-              <button type="submit" class="btn btn-primary fw-semibold">UPLOAD &amp; CONTINUE</button>
+              <button type="submit" class="btn btn-primary fw-semibold">VERIFY VISA &amp; CONTINUE</button>
             </form>
 
             {% if not visa_verification_failed %}
@@ -149,17 +156,9 @@
             <a href="{{ url_for('student_visa_payment', request_id=linked_visa_request.id) }}" class="btn btn-primary fw-semibold">Complete Visa Assistance &rarr;</a>
             {% endif %}
 
-          {% elif application.visa_step_status == 'NOT_REQUIRED' %}
-            <h4 class="fw-bold mb-3 text-success">✓ Visa requirement completed</h4>
-            <p class="text-muted mb-4">You told us you already have your U.S. student visa arrangements in place - no further action needed here.</p>
-            <form method="POST">
-              <input type="hidden" name="action" value="continue">
-              <button type="submit" class="btn btn-primary fw-semibold">Continue Application &rarr;</button>
-            </form>
-
-          {% elif application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}
-            <h4 class="fw-bold mb-3 text-success">✅ Visa Document Uploaded</h4>
-            <p class="mb-2">Your U.S. student visa document has been successfully uploaded to your Africa ScholarBridge application.</p>
+          {% elif application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' and application.visa_verification_status == 'VERIFIED' %}
+            <h4 class="fw-bold mb-3 text-success">✅ Visa Verified</h4>
+            <p class="mb-2">Your U.S. student visa passed all automatic verification checks.</p>
             <p class="text-muted mb-4">You can now continue with your annual funding application.</p>
             <a href="{{ url_for('application_visa_document_view') }}" target="_blank" class="btn btn-outline-secondary mb-3">View Document</a>
             <form method="POST">
@@ -167,7 +166,7 @@
               <button type="submit" class="btn btn-primary fw-semibold">CONTINUE APPLICATION &rarr;</button>
             </form>
 
-          {% elif application.visa_step_status == 'COMPLETE' %}
+          {% elif application.visa_step_status == 'COMPLETE' and application.visa_status == 'NEEDS_ASSISTANCE' %}
             <h4 class="fw-bold mb-3 text-success">✅ Visa Assistance Completed</h4>
             <p class="mb-2">Your Africa ScholarBridge visa assistance payment has been successfully verified.</p>
             <p class="text-muted mb-3">You can now continue with your annual funding application.</p>
