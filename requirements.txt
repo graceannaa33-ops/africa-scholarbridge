@@ -2,3 +2,13 @@ Flask==3.0.3
 Werkzeug==3.0.3
 gunicorn==23.0.0
 pypdf==6.19.0
+# --- Automatic visa verification: reading JPG/PNG and scanned-PDF visas (OCR) ---
+# Runs locally on the server (no external service). opencv-python-headless is
+# the libGL-free OpenCV build; the placeholder below stops rapidocr from pulling
+# in the GUI build, which cannot load on Render's Python runtime.
+Pillow==12.3.0
+numpy==2.4.6
+onnxruntime==1.30.0
+opencv-python-headless==5.0.0.93
+./vendor/opencv-python-stub
+rapidocr-onnxruntime==1.4.4

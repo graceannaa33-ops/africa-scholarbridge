@@ -147,7 +147,7 @@
                 <tr><th>🇺🇸 Visa Requirement</th>
                   <td>
                     {% if application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}
-                      <span class="badge bg-success">✓ Complete - Visa Verified</span>
+                      <span class="badge bg-success">✓ Complete - Visa Information Verified</span>
                     {% elif application.visa_step_status == 'COMPLETE' %}
                       <span class="badge bg-success">✓ Complete - Visa Assistance Paid</span>
                     {% elif application.visa_step_status == 'NOT_REQUIRED' %}

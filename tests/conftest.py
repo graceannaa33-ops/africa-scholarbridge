@@ -143,30 +143,81 @@ def fmt_foil(d):
     return d.strftime("%d%b%Y").upper()
 
 
-def valid_case(**overrides):
-    """A consistent, genuine-looking visa: form fields + matching PDF."""
-    issue = date.today() - timedelta(days=200)
-    expiry = date.today() + timedelta(days=900)
+def _visa_fields(overrides):
     p = {
         "surname": "OTIENO", "given": "AMINA WANJIRU", "passport": "AK1234567",
-        "dob": date(2003, 5, 14), "visa_class": "F1", "issue": issue, "expiry": expiry,
+        "dob": date(2003, 5, 14), "visa_class": "F1",
+        "issue": date.today() - timedelta(days=200), "expiry": date.today() + timedelta(days=900),
     }
     p.update(overrides)
     l1, l2 = make_mrz(p["surname"], p["given"], p["passport"], "KEN",
                       p["dob"].strftime("%y%m%d"), "F", p["expiry"].strftime("%y%m%d"))
-    pdf = make_pdf([
-        "UNITED STATES OF AMERICA  VISA",
+    printed = [
+        "UNITED STATES OF AMERICA   VISA",
         f"Surname {p['surname']}", f"Given Name {p['given']}",
         f"Visa Type/Class R {p['visa_class']}", f"Passport Number {p['passport']}",
         f"Issue Date {fmt_foil(p['issue'])}", f"Expiration Date {fmt_foil(p['expiry'])}",
-        l1, l2,
-    ])
+    ]
+    return p, printed, (l1, l2)
+
+
+def visa_image(blur=0, **overrides):
+    """A rendered visa-page picture (PIL Image) - what a student photographs."""
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
+    _, printed, (l1, l2) = _visa_fields(overrides)
+
+    def font(size):
+        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+                     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"):
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+        return ImageFont.load_default(size=size)
+
+    im = Image.new("RGB", (1400, 900), (236, 242, 236))
+    d = ImageDraw.Draw(im)
+    y = 40
+    for line in printed:
+        d.text((60, y), line, fill=(20, 20, 60), font=font(30))
+        y += 60
+    d.text((40, 720), l1, fill=(0, 0, 0), font=font(34))
+    d.text((40, 790), l2, fill=(0, 0, 0), font=font(34))
+    if blur:
+        im = im.filter(ImageFilter.GaussianBlur(blur))
+    return im
+
+
+def image_bytes(im, fmt):
+    b = io.BytesIO()
+    if fmt == "JPEG":
+        im.save(b, "JPEG", quality=80)
+    else:
+        im.save(b, fmt)
+    return b.getvalue()
+
+
+def valid_case(fmt="pdf", blur=0, **overrides):
+    """A consistent visa: form fields + matching document.
+    fmt: 'pdf' (searchable text PDF), 'jpg', 'png', or 'scanpdf' (image-only PDF)."""
+    p, printed, (l1, l2) = _visa_fields(overrides)
+    if fmt == "pdf":
+        data = make_pdf(printed + [l1, l2])
+    elif fmt == "jpg":
+        data = image_bytes(visa_image(blur, **overrides), "JPEG")
+    elif fmt == "png":
+        data = image_bytes(visa_image(blur, **overrides), "PNG")
+    elif fmt == "scanpdf":
+        data = image_bytes(visa_image(blur, **overrides), "PDF")
+    else:
+        raise ValueError(fmt)
     form = {
         "visa_type_category": "F-1", "passport_number": "AK1234567",
         "visa_issue_date": p["issue"].isoformat(), "visa_expiry_date": p["expiry"].isoformat(),
         "additional_info": "",
     }
-    return form, pdf
+    return form, data
+
+
+FILENAMES = {"pdf": "visa.pdf", "jpg": "visa.jpg", "png": "visa.png", "scanpdf": "visa-scan.pdf"}
 
 
 PNG_BYTES = (b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (800).to_bytes(4, "big")

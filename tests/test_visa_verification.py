@@ -6,8 +6,8 @@ from datetime import date, timedelta
 import pytest
 
 import visa_verification as vv
-from conftest import (PNG_BYTES, UPLOAD_DIR, choose_yes, count_applications, get_application,
-                      make_mrz, make_pdf, upload, valid_case, visa_requests_for)
+from conftest import (FILENAMES, PNG_BYTES, UPLOAD_DIR, choose_yes, count_applications, get_application,
+                      image_bytes, make_mrz, make_pdf, upload, valid_case, visa_requests_for)
 from database import get_db
 
 
@@ -34,15 +34,18 @@ def _assert_failed_to_assistance(client, student, r):
 # ---------------------------------------------------------------------
 # Valid submission: the ONLY way to see the success message
 # ---------------------------------------------------------------------
-def test_valid_visa_is_verified_and_student_can_continue(client, student):
+@pytest.mark.parametrize("fmt", ["pdf", "jpg", "png", "scanpdf"])
+def test_valid_visa_is_verified_and_student_can_continue(client, student, fmt):
+    """1-3: valid readable PDF (text), JPG, PNG - plus an image-only scanned PDF."""
     choose_yes(client)
-    form, pdf = valid_case()
+    form, data = valid_case(fmt)
     before = set(os.listdir(UPLOAD_DIR)) if os.path.isdir(UPLOAD_DIR) else set()
-    r = upload(client, form, pdf, "my-visa.pdf")
-    assert r.headers["Location"].endswith("/application/step/visa")
+    r = upload(client, form, data, FILENAMES[fmt])
+    assert r.headers["Location"].endswith("/application/step/visa"), r.headers["Location"]
     page = client.get(r.headers["Location"]).get_data(as_text=True)
-    assert "Visa verified successfully" in page
-    assert "Visa Verified" in page
+    assert "Visa information verified successfully" in page
+    assert "Visa Information Verified" in page
+    assert "not an authentication of your visa by the U.S. government" in page
 
     row = get_application(student["student_id"])
     assert row["visa_status"] == "HAS_VISA"
@@ -92,6 +95,20 @@ def _tampered_pdf():
     return pdf.replace(good, bad)
 
 
+def _not_a_visa_png():
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", (1200, 800), (250, 250, 250))
+    d = ImageDraw.Draw(im)
+    for i, t in enumerate(["BOARDING PASS", "NAIROBI -> NEW YORK", "PASSENGER OTIENO AMINA", "SEAT 23A F1"]):
+        d.text((80, 80 + 90 * i), t, fill=(0, 0, 0))
+    return image_bytes(im, "PNG")
+
+
+def _noise_png():
+    from PIL import Image
+    return image_bytes(Image.frombytes("RGB", (800, 600), os.urandom(800 * 600 * 3)), "PNG")
+
+
 FAILURES = {
     "non-student visa class (B-2)": lambda: (dict(valid_case()[0], visa_type_category="B-2"), valid_case()[1], "v.pdf"),
     "garbage visa class": lambda: (dict(valid_case()[0], visa_type_category="XYZ"), valid_case()[1], "v.pdf"),
@@ -119,7 +136,22 @@ FAILURES = {
     "renamed file (exe as pdf)": lambda: (valid_case()[0], b"MZ\x90\x00" + b"\x00" * 2000, "visa.pdf"),
     "too small file": lambda: (valid_case()[0], b"%PDF-1.4\n%%EOF", "visa.pdf"),
     "corrupted pdf": lambda: (valid_case()[0], b"%PDF-1.4\n" + os.urandom(3000), "visa.pdf"),
-    "photo (unreadable without OCR)": lambda: (valid_case()[0], PNG_BYTES, "visa.png"),
+    "corrupt image (PNG header, no picture)": lambda: (valid_case()[0], PNG_BYTES, "visa.png"),
+    "corrupt JPG (truncated)": lambda: (valid_case()[0], valid_case("jpg")[1][:3000], "visa.jpg"),
+    # ---- the same checks on PHOTOS (real OCR) ----
+    "JPG: passport number not on visa": lambda: (dict(valid_case()[0], passport_number="BK7654321"),
+                                                 valid_case("jpg")[1], "visa.jpg"),
+    "JPG: expired visa": lambda: (*valid_case("jpg", issue=_today(-900), expiry=_today(-5)), "visa.jpg"),
+    "PNG: visa belongs to someone else (name)": lambda: (valid_case()[0],
+                                                         valid_case("png", surname="KAMAU", given="JOHN")[1], "visa.png"),
+    "PNG: visa date of birth differs": lambda: (valid_case()[0], valid_case("png", dob=date(1999, 1, 1))[1], "visa.png"),
+    "JPG: wrong visa class entered": lambda: (dict(valid_case()[0], visa_type_category="J-1"),
+                                              valid_case("jpg")[1], "visa.jpg"),
+    "JPG: blurry photo": lambda: (*valid_case("jpg", blur=4), "visa.jpg"),
+    "JPG: slightly blurry photo (name misread)": lambda: (*valid_case("jpg", blur=1.6), "visa.jpg"),
+    "PNG: picture that is not a visa": lambda: (valid_case()[0], _not_a_visa_png(), "photo.png"),
+    "PNG: random noise": lambda: (valid_case()[0], _noise_png(), "visa.png"),
+    "scanned PDF: blurry": lambda: (*valid_case("scanpdf", blur=4), "visa.pdf"),
     "pdf with no visa MRZ": lambda: (valid_case()[0], make_pdf(["My holiday itinerary", "F1 race tickets"] + ["x" * 40] * 5), "v.pdf"),
     "tampered MRZ check digit": lambda: (valid_case()[0], _tampered_pdf(), "v.pdf"),
 }
@@ -216,7 +248,7 @@ def test_legacy_unverified_upload_is_no_longer_accepted(client, student):
     row = get_application(student["student_id"])
     assert row["visa_step_status"] == "ACTION_REQUIRED"
     page = client.get("/application/step/visa").get_data(as_text=True)
-    assert "Visa Verified" not in page and "VERIFY VISA" in page
+    assert "Visa Information Verified" not in page and "VERIFY VISA" in page
 
 
 # ---------------------------------------------------------------------
@@ -272,3 +304,39 @@ def test_after_failure_existing_mpesa_verification_lets_student_continue(client,
     assert client.post("/application/step/visa", data={"action": "continue"}).headers[
         "Location"].endswith("/application/step/preferences")
     assert client.get("/application/step/preferences").status_code == 200
+
+
+# ---------------------------------------------------------------------
+# Fail closed when the image reader itself can't run
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("problem", ["reader missing", "reader times out", "server busy"])
+def test_valid_photo_still_fails_if_it_cannot_be_read(client, student, monkeypatch, problem):
+    import subprocess
+    if problem == "reader missing":
+        monkeypatch.setattr(vv, "_OCR_WORKER", "/nonexistent/visa_ocr_worker.py")
+    elif problem == "reader times out":
+        def boom(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="ocr", timeout=1)
+        monkeypatch.setattr(vv.subprocess, "run", boom)
+    else:
+        monkeypatch.setattr(vv._OcrLock, "__enter__", lambda self: False)
+    choose_yes(client)
+    form, data = valid_case("jpg")
+    r = upload(client, form, data, "visa.jpg")
+    _assert_failed_to_assistance(client, student, r)
+
+
+def test_ocr_lookalike_passport_is_only_accepted_for_the_same_number():
+    assert vv._same_despite_ocr("AK12345G7", "AK1234567") is True   # G read for 6
+    assert vv._same_despite_ocr("AKI234567", "AK1234567") is True   # I read for 1
+    assert vv._same_despite_ocr("AK1234568", "AK1234567") is False
+
+
+@pytest.mark.parametrize("surname,given,fmt", [("KAMAU", "JOHN", "png"), ("LI", "WEI", "jpg")])
+def test_short_names_on_photos_are_read(surname, given, fmt):
+    """Short names followed by long <<< fillers must still be read from photos."""
+    form, data = valid_case(fmt, surname=surname, given=given)
+    ok, cleaned, errors = vv.verify_visa_submission(
+        form, data, FILENAMES[fmt], {"full_name": f"{given} {surname}", "date_of_birth": "2003-05-14"})
+    assert ok, errors
+    assert cleaned["read_from"] == "ocr"

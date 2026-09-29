@@ -29,7 +29,7 @@
               {{ u.visa_document_status }}
             </span>
             {% if u.visa_verification_status == 'VERIFIED' %}
-              <span class="badge bg-success">Verified automatically</span>
+              <span class="badge bg-success">Passed automatic checks</span>
             {% elif u.visa_verification_status %}
               <span class="badge bg-danger">{{ u.visa_verification_status }}</span>
             {% endif %}

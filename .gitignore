@@ -13,3 +13,5 @@ uploads/visa_documents/*
 # NOTE: templates/ and static/ MUST be committed - the site cannot start
 # without them (TemplateNotFound on Render).
 database/*.db
+vendor/*/*.egg-info/
+vendor/*/build/

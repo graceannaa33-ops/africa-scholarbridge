@@ -1655,7 +1655,7 @@ def application_visa_document_upload():
                visa_document_uploaded_at = CURRENT_TIMESTAMP, visa_document_type = ?,
                visa_document_issue_date = ?, visa_document_expiry_date = ?, visa_document_passport_number = ?,
                visa_document_notes = ?, visa_verification_status = 'VERIFIED',
-               visa_verification_notes = 'All automatic visa checks passed.', visa_verified_at = CURRENT_TIMESTAMP,
+               visa_verification_notes = 'All automatic visa information checks passed (not a U.S. government authentication).', visa_verified_at = CURRENT_TIMESTAMP,
                visa_step_status = 'COMPLETE', last_updated = CURRENT_TIMESTAMP
            WHERE id = ? AND visa_status = 'HAS_VISA' AND visa_step_status = 'ACTION_REQUIRED'""",
         (stored_filename, filename[:255], details["visa_type"],
@@ -1663,11 +1663,12 @@ def application_visa_document_upload():
          details["passport_number"], details["notes"] or None,
          application["id"]),
     )
-    add_history(db, application["id"], application["status"], "U.S. visa verified automatically.")
-    add_notification(db, student["id"], "✅ Your U.S. student visa was verified successfully.")
+    add_history(db, application["id"], application["status"],
+                f"U.S. visa information passed all automatic checks (read from: {details.get('read_from')}).")
+    add_notification(db, student["id"], "✅ Your U.S. visa information was verified successfully.")
     db.commit()
     session.pop(VISA_FAILED_SESSION_KEY, None)
-    flash("✅ Visa verified successfully - your U.S. student visa passed all automatic checks.", "success")
+    flash("✅ Visa information verified successfully.", "success")
     return redirect(url_for("application_step", step_name="visa"))
 
 

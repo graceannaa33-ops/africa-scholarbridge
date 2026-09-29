@@ -1,49 +1,66 @@
 """
 visa_verification.py
 --------------------
-Fully AUTOMATIC verification of a "Yes, I already have my U.S. visa"
+Fully AUTOMATIC checking of a "Yes, I already have my U.S. visa"
 submission. There is no manual/admin approval step.
 
-The rule is fail-safe: a visa is VERIFIED only when every check below
-passes against the uploaded document itself. Anything that is wrong,
-missing, inconsistent - or that this system simply cannot read and
-confirm - FAILS, and the caller sends the student to the
-"I do not have a U.S. visa" assistance path.
+What a PASS means - and what it does not
+----------------------------------------
+A pass means: the information the student entered is complete and valid,
+and it is CONSISTENT with what this server could actually READ from the
+uploaded visa document and with the student's own application. It does
+NOT mean the visa has been authenticated with the U.S. government - no
+file check, realistic-looking image, plausible field or mathematically
+valid check digit can prove that. The wording shown to students
+("Visa information verified successfully") says exactly this.
 
-Why the document must contain its machine-readable zone (MRZ)
--------------------------------------------------------------
-Receiving a file proves nothing about what is in it. Every U.S. visa foil
-carries a two-line machine-readable zone (ICAO 9303 "MRV-A": 2 x 44
-characters) with check digits over the passport number, date of birth
-and visa expiry date. That is the only part of a visa this server can
-confirm reliably, so verification requires it:
+Fail closed
+-----------
+Anything wrong, missing, expired, inconsistent, unsupported - or that the
+server cannot READ reliably from the document - FAILS. The caller then
+moves the student to the "I do not have a U.S. visa" assistance path.
+Nothing is ever passed because it "looks fine" or because reading failed.
 
-  * PDF uploads: the text layer is read with pypdf. A scanner app that
-    produces a searchable PDF (e.g. Adobe Scan, Microsoft Lens) works.
-  * JPG/PNG uploads (and image-only PDFs) contain no machine-readable
-    text. Unless OCR is installed on the server (optional: pytesseract +
-    the tesseract binary), the contents cannot be read, so the upload
-    fails verification rather than being assumed genuine.
+Reading the document
+--------------------
+Every U.S. visa foil carries a two-line machine-readable zone (MRZ, ICAO
+9303 "MRV-A": 2 x 44 characters) with check digits over the passport
+number, date of birth and expiry date. The MRZ must be read from the
+document itself:
+  * PDF  - the text layer is read with pypdf. If it has no readable MRZ
+           (a scanned, image-only PDF), the images embedded in the PDF
+           are read with OCR instead.
+  * JPG / JPEG / PNG - read with OCR (visa_ocr_worker.py: RapidOCR on
+           ONNX Runtime, entirely on this server, in a short-lived
+           subprocess with a timeout). A blurry, dark, cropped or
+           otherwise unreadable image simply yields no valid MRZ -> FAIL.
+OCR character slips are only corrected where the MRZ format fixes the
+character type (digits-only or letters-only positions); every number is
+still guarded by its check digit, so a misread can only cause a FAIL,
+never a false PASS.
 
 Checks performed (all must pass)
 --------------------------------
-Form      : required fields; visa class is a U.S. student/exchange class
-            (F-1, J-1, M-1); passport number format; valid ISO dates;
-            not expired; issue date not in the future; issue < expiry;
-            validity no longer than 10 years; not issued before birth.
-File      : present; allowed extension; size limits; magic bytes match
-            the extension; file actually parses (PDF opens, not
-            encrypted, sane page count; image headers + dimensions).
-Document  : a U.S. visa MRZ is present (document code V, issuer USA);
-            every MRZ check digit is correct; MRZ passport number ==
-            entered passport number; MRZ expiry == entered expiry; MRZ
-            date of birth == applicant's date of birth; MRZ name ==
-            applicant's name; the printed visa class and issue date on
-            the foil match what was entered.
+Form      : required fields; visa class is F-1, J-1 or M-1; passport
+            number format; valid ISO dates; not expired; issue date not in
+            the future; issue < expiry; validity <= 10 years; not issued
+            before birth.
+File      : present; allowed extension; size limits; content signature
+            matches the extension; the file actually opens.
+Document  : a U.S. visa MRZ (document code V, issuer USA) is read from
+            the document; all MRZ check digits are correct; MRZ passport
+            number == entered; MRZ expiry == entered and not expired; MRZ
+            date of birth == application; MRZ name == application; the
+            visa class and issue date printed on the visa == entered.
 """
 
 import io
+import json
+import os
 import re
+import subprocess
+import sys
+import time
 import unicodedata
 from datetime import date, datetime
 
@@ -51,8 +68,14 @@ ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
 MIN_FILE_BYTES = 512
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_PDF_PAGES = 10
+MAX_PDF_IMAGES_TO_READ = 3
 MIN_IMAGE_SIDE = 300           # pixels; smaller than this can't hold a legible visa
 MAX_VISA_VALIDITY_YEARS = 10   # longest validity the U.S. issues on any visa
+
+# OCR runs in a subprocess; keep the whole request under gunicorn's 30 s timeout.
+OCR_TIMEOUT_SECONDS = 18
+OCR_LOCK_WAIT_SECONDS = 8
+_OCR_WORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visa_ocr_worker.py")
 
 # U.S. student / exchange-visitor visa classes accepted for this step.
 STUDENT_VISA_CLASSES = {"F-1", "J-1", "M-1"}
@@ -72,6 +95,12 @@ _MRZ_RE = re.compile(
     r"([A-Z0-9<]{9})([0-9<])([A-Z<]{3})([0-9]{6})([0-9])([MFX<])([0-9]{6})([0-9])([A-Z0-9<]{16})"
 )
 _MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+
+# Characters OCR commonly confuses. Used ONLY where the MRZ format dictates
+# the character type, or to compare two values that must be identical.
+_TO_DIGIT = str.maketrans({"O": "0", "Q": "0", "D": "0", "U": "0", "I": "1", "L": "1", "T": "1",
+                           "Z": "2", "S": "5", "G": "6", "B": "8"})
+_TO_LETTER = str.maketrans({"0": "O", "1": "I", "2": "Z", "5": "S", "6": "G", "8": "B"})
 
 
 # ---------------------------------------------------------------------
@@ -130,6 +159,12 @@ def _foil_date(d):
     return f"{d.day:02d}{_MONTHS[d.month - 1]}{d.year}"
 
 
+def _same_despite_ocr(a, b):
+    """True when two strings are identical once OCR look-alikes (O/0, I/1,
+    S/5 ...) are treated as the same character."""
+    return len(a) == len(b) and a.translate(_TO_DIGIT) == b.translate(_TO_DIGIT)
+
+
 # ---------------------------------------------------------------------
 # Form validation
 # ---------------------------------------------------------------------
@@ -185,7 +220,60 @@ def validate_details(form, today=None):
 
 
 # ---------------------------------------------------------------------
-# File checks + text extraction
+# OCR (subprocess)
+# ---------------------------------------------------------------------
+class _OcrLock:
+    """One OCR at a time per server (memory), shared across gunicorn
+    workers via a lock file. Not getting the lock in time = unreadable."""
+
+    def __init__(self):
+        self.fh = None
+
+    def __enter__(self):
+        try:
+            import fcntl
+        except ImportError:  # Windows dev machines: no cross-process lock
+            return True
+        lock_dir = os.environ.get("UPLOAD_ROOT") or os.path.dirname(os.path.abspath(__file__))
+        os.makedirs(lock_dir, exist_ok=True)
+        self.fh = open(os.path.join(lock_dir, ".visa_ocr.lock"), "w")
+        deadline = time.monotonic() + OCR_LOCK_WAIT_SECONDS
+        while True:
+            try:
+                fcntl.flock(self.fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except OSError:
+                if time.monotonic() > deadline:
+                    return False
+                time.sleep(0.2)
+
+    def __exit__(self, *exc):
+        if self.fh:
+            self.fh.close()  # releases the lock
+
+
+def ocr_image_lines(image_bytes):
+    """Returns the text lines read from an image, or None when the image
+    could not be read for ANY reason (library missing, corrupt image,
+    timeout, out of memory, server busy). None always means FAIL."""
+    with _OcrLock() as acquired:
+        if not acquired:
+            return None
+        try:
+            proc = subprocess.run(
+                [sys.executable, _OCR_WORKER], input=image_bytes, capture_output=True,
+                timeout=OCR_TIMEOUT_SECONDS,
+            )
+            if proc.returncode != 0:
+                return None
+            lines = json.loads(proc.stdout.decode("utf-8") or "{}").get("lines")
+            return [str(x) for x in lines] if isinstance(lines, list) else None
+        except (subprocess.TimeoutExpired, OSError, ValueError):
+            return None
+
+
+# ---------------------------------------------------------------------
+# File checks + reading the document
 # ---------------------------------------------------------------------
 def _png_size(data):
     if len(data) < 24 or data[12:16] != b"IHDR":
@@ -209,82 +297,124 @@ def _jpeg_size(data):
     return None
 
 
-def _ocr_image(data):
-    """Optional OCR. Returns text, or None when OCR isn't available on this
-    server (then the image is treated as unverifiable - never as valid)."""
-    try:
-        import pytesseract
-        from PIL import Image
-        return pytesseract.image_to_string(Image.open(io.BytesIO(data)))
-    except Exception:
-        return None
+def _pdf_embedded_images(reader):
+    """Largest images embedded in the PDF's pages (a scanned visa page)."""
+    found = []
+    for page in reader.pages:
+        try:
+            for img in page.images:
+                data = img.data
+                if data and len(data) > 5_000:
+                    found.append(data)
+        except Exception:
+            continue
+    found.sort(key=len, reverse=True)
+    return found[:MAX_PDF_IMAGES_TO_READ]
 
 
-def check_file_and_extract_text(data, filename):
-    """Returns (text, errors). `text` is None when nothing machine-readable
-    could be obtained from the document."""
+def read_document(data, filename):
+    """Checks the file and reads its text.
+
+    Returns (text, source, errors). `text` is None when nothing
+    machine-readable could be obtained. `source` is 'pdf-text', 'ocr' or None.
+    """
     if not filename:
-        return None, ["Please choose your visa document to upload."]
+        return None, None, ["Please choose your visa document to upload."]
     ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
     if ext not in ALLOWED_EXTENSIONS:
-        return None, ["Unsupported file type. Please upload a PDF, JPG, JPEG, or PNG file."]
+        return None, None, ["Unsupported file type. Please upload a PDF, JPG, JPEG, or PNG file."]
     if not data:
-        return None, ["The uploaded file is empty."]
+        return None, None, ["The uploaded file is empty."]
     if len(data) < MIN_FILE_BYTES:
-        return None, ["The uploaded file is too small to be a visa document."]
+        return None, None, ["The uploaded file is too small to be a visa document."]
     if len(data) > MAX_FILE_BYTES:
-        return None, [f"The uploaded file is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB."]
+        return None, None, [f"The uploaded file is larger than {MAX_FILE_BYTES // (1024 * 1024)} MB."]
     if not data.startswith(_SIGNATURES[ext]):
-        return None, ["This file is not a valid PDF/JPG/PNG (its contents don't match its type)."]
+        return None, None, ["This file is not a valid PDF/JPG/PNG (its contents don't match its type)."]
 
     if ext == "pdf":
         try:
             from pypdf import PdfReader
             reader = PdfReader(io.BytesIO(data))
             if reader.is_encrypted:
-                return None, ["Password-protected PDFs can't be read. Please upload an unprotected copy."]
-            pages = reader.pages
-            if len(pages) == 0:
-                return None, ["The PDF has no pages."]
-            if len(pages) > MAX_PDF_PAGES:
-                return None, [f"The PDF has more than {MAX_PDF_PAGES} pages. Please upload only your visa page."]
-            text = "\n".join((p.extract_text() or "") for p in pages)
+                return None, None, ["Password-protected PDFs can't be read. Please upload an unprotected copy."]
+            if len(reader.pages) == 0:
+                return None, None, ["The PDF has no pages."]
+            if len(reader.pages) > MAX_PDF_PAGES:
+                return None, None, [f"The PDF has more than {MAX_PDF_PAGES} pages. Please upload only your visa page."]
+            text = "\n".join((p.extract_text() or "") for p in reader.pages)
         except Exception:
-            return None, ["The PDF could not be read - it may be damaged."]
-        return (text if text.strip() else None), []
+            return None, None, ["The PDF could not be read - it may be damaged."]
+        if find_us_visa_mrz(text):
+            return text, "pdf-text", []
+        # Scanned (image-only) PDF: read the embedded page image(s).
+        for image in _pdf_embedded_images(reader):
+            lines = ocr_image_lines(image)
+            if lines and find_us_visa_mrz("\n".join(lines)):
+                return text + "\n" + "\n".join(lines), "ocr", []
+        return (text if text.strip() else None), ("pdf-text" if text.strip() else None), []
 
     size = _png_size(data) if ext == "png" else _jpeg_size(data)
     if not size:
-        return None, ["The image could not be read - it may be damaged."]
+        return None, None, ["The image could not be read - it may be damaged."]
     if min(size) < MIN_IMAGE_SIDE:
-        return None, ["The image is too small to show a legible visa."]
-    text = _ocr_image(data)
-    return (text if text and text.strip() else None), []
+        return None, None, ["The image is too small to show a legible visa."]
+    lines = ocr_image_lines(data)
+    if not lines:
+        return None, None, []
+    return "\n".join(lines), "ocr", []
 
 
 # ---------------------------------------------------------------------
 # MRZ parsing
 # ---------------------------------------------------------------------
-_DIGIT_FIX = str.maketrans({"O": "0", "Q": "0", "D": "0", "I": "1", "L": "1", "Z": "2", "S": "5", "B": "8"})
+def _fix_line1(raw):
+    """Normalise an OCR'd MRZ line 1 to exactly 44 characters, or None."""
+    s = raw.rstrip("<")
+    if not s.startswith("V") or len(s) < 8 or len(s) > 44:
+        return None
+    s = s[:2].replace("0", "O") + s[2:5] + s[5:].translate(_TO_LETTER)
+    # A readable name field always has the '<<' surname/given-name separator.
+    if s[2:5] != "USA" or "<<" not in s[5:]:
+        return None
+    return s.ljust(44, "<")
+
+
+def _fix_line2(raw):
+    """Normalise an OCR'd MRZ line 2 to exactly 44 characters, or None.
+    Only positions whose type is fixed by the format are corrected."""
+    s = raw.rstrip("<")
+    if len(s) < 28 or len(s) > 44:
+        return None
+    s = (s[:9] + s[9].translate(_TO_DIGIT) + s[10:13].translate(_TO_LETTER)
+         + s[13:20].translate(_TO_DIGIT) + s[20] + s[21:28].translate(_TO_DIGIT) + s[28:])
+    return s.ljust(44, "<")
+
+
+def _mrz_candidates(text):
+    upper = (text or "").upper().replace("«", "<")
+    compact = re.sub(r"\s+", "", upper)
+    yield compact  # text-layer PDFs: exact MRZ somewhere in the text
+    lines = [re.sub(r"\s+", "", ln) for ln in upper.splitlines()]
+    lines = [ln for ln in lines if ln]
+    for i, ln in enumerate(lines):
+        l1 = _fix_line1(ln)
+        if not l1:
+            continue
+        for nxt in lines[i + 1:i + 4]:
+            l2 = _fix_line2(nxt)
+            if l2:
+                yield l1 + l2
 
 
 def find_us_visa_mrz(text):
-    """Finds and parses a U.S. visa MRZ in extracted text. Returns a dict or
-    None. Check digits are NOT validated here (see verify_mrz)."""
-    compact = re.sub(r"\s+", "", (text or "").upper()).replace("«", "<")
-    m = _MRZ_RE.search(compact)
-    if not m:
-        # Common OCR slips inside digit-only fields (O->0, I->1 ...) are
-        # corrected ONLY in those fields; check digits still have to pass.
-        for m1 in re.finditer(r"V[A-Z<]USA[A-Z<]{39}", compact):
-            tail = compact[m1.end():m1.end() + 44]
-            if len(tail) < 44:
-                continue
-            fixed = (tail[:13] + tail[13:20].translate(_DIGIT_FIX) + tail[20]
-                     + tail[21:28].translate(_DIGIT_FIX) + tail[28:])
-            m = _MRZ_RE.fullmatch(m1.group(0) + fixed)
-            if m:
-                break
+    """Finds and parses a U.S. visa MRZ in the document text. Returns a dict
+    or None. Check digits are NOT validated here (see verify_visa_submission)."""
+    m = None
+    for candidate in _mrz_candidates(text):
+        m = _MRZ_RE.search(candidate)
+        if m:
+            break
     if not m:
         return None
     line1, pp, pp_cd, nat, dob, dob_cd, sex, exp, exp_cd, opt = m.groups()
@@ -309,33 +439,39 @@ def find_us_visa_mrz(text):
 
 def _names_match(mrz, applicant_name):
     app_tokens = _name_tokens(applicant_name)
-    if not app_tokens or not mrz["surname_tokens"]:
+    if not app_tokens or not mrz["surname_tokens"] or not mrz["given_tokens"]:
         return False
     all_mrz = mrz["surname_tokens"] + mrz["given_tokens"]
-
-    def present(tok, may_be_truncated):
-        return tok in app_tokens or (may_be_truncated and any(a.startswith(tok) for a in app_tokens))
-
     for i, tok in enumerate(all_mrz):
-        if not present(tok, mrz["name_truncated"] and i == len(all_mrz) - 1):
+        may_be_truncated = mrz["name_truncated"] and i == len(all_mrz) - 1
+        if tok not in app_tokens and not (may_be_truncated and any(a.startswith(tok) for a in app_tokens)):
             return False
-    return bool(mrz["given_tokens"])
+    return True
 
 
 # ---------------------------------------------------------------------
 # The whole decision
 # ---------------------------------------------------------------------
+UNREADABLE_MESSAGE = (
+    "The visa information could not be read reliably from your document (it may be blurry, dark, "
+    "cropped, too small, or not a U.S. visa). Upload a clear, straight, well-lit photo or scan of the "
+    "whole visa page, including the two lines with <<< characters at the bottom."
+)
+
+
 def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
     """applicant: {'full_name': str, 'date_of_birth': 'YYYY-MM-DD'}.
 
-    Returns (verified: bool, cleaned: dict, errors: list[str]). `verified`
-    is True ONLY when every check has passed.
+    Returns (passed: bool, cleaned: dict, errors: list[str]). `passed` is
+    True ONLY when every check has passed on information actually read
+    from the document.
     """
     today = today or date.today()
     cleaned, errors = validate_details(form, today)
 
-    text, file_errors = check_file_and_extract_text(file_bytes, filename)
+    text, source, file_errors = read_document(file_bytes, filename)
     errors += file_errors
+    cleaned["read_from"] = source
 
     dob = parse_iso_date(applicant.get("date_of_birth"))
     if not (applicant.get("full_name") or "").strip() or not dob:
@@ -347,31 +483,34 @@ def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
 
     if file_errors:
         return False, cleaned, errors
-    if text is None:
-        errors.append("Your visa could not be verified automatically: the document has no readable text. "
-                      "Upload a searchable PDF scan of your visa page that shows the two machine-readable "
-                      "lines (with <<< characters) at the bottom.")
-        return False, cleaned, errors
-
-    mrz = find_us_visa_mrz(text)
+    mrz = find_us_visa_mrz(text) if text else None
     if not mrz:
-        errors.append("No U.S. visa machine-readable zone was found in the document, so it cannot be "
-                      "verified as a U.S. visa.")
+        errors.append(UNREADABLE_MESSAGE)
         return False, cleaned, errors
 
-    if (mrz_check_digit(mrz["passport_field"]) != mrz["passport_cd"]
+    # Passport number: accept an OCR look-alike reading ONLY if it is the
+    # same number as entered; the check digit must then pass on the
+    # entered value, so a misread can never pass for a different number.
+    passport_field = mrz["passport_field"]
+    entered_pp = cleaned["passport_number"]
+    if entered_pp and source == "ocr" and _same_despite_ocr(passport_field.rstrip("<"), entered_pp):
+        passport_field = entered_pp + passport_field[len(entered_pp):]
+    mrz_passport = passport_field.replace("<", "")
+
+    if (mrz_check_digit(passport_field) != mrz["passport_cd"]
             or mrz_check_digit(mrz["dob_raw"]) != mrz["dob_cd"]
             or mrz_check_digit(mrz["expiry_raw"]) != mrz["expiry_cd"]):
-        errors.append("The visa's machine-readable zone failed its security check digits.")
+        errors.append("The visa's machine-readable lines failed their check digits "
+                      "(the document is unreadable, altered, or not a genuine layout).")
         return False, cleaned, errors
 
     mrz_dob = _mrz_date(mrz["dob_raw"], future=False)
     mrz_exp = _mrz_date(mrz["expiry_raw"], future=True)
     if not mrz_dob or not mrz_exp:
-        errors.append("The dates in the visa's machine-readable zone are invalid.")
+        errors.append("The dates in the visa's machine-readable lines are invalid.")
         return False, cleaned, errors
 
-    if cleaned["passport_number"] and mrz["passport_number"] != cleaned["passport_number"]:
+    if entered_pp and mrz_passport != entered_pp:
         errors.append("The passport number you entered does not match the passport number on the visa.")
     expiry = parse_iso_date(cleaned["expiry_date"])
     if expiry and mrz_exp != expiry:
@@ -381,15 +520,20 @@ def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
     if dob and mrz_dob != dob:
         errors.append("The date of birth on the visa does not match the date of birth in your application.")
     if not _names_match(mrz, applicant.get("full_name")):
-        errors.append("The name on the visa does not match the name in your application.")
+        errors.append("The name on the visa does not match (or could not be read clearly as) "
+                      "the name in your application.")
 
     printed = (text or "").upper()
-    compact = re.sub(r"\s+", "", printed)
     if cleaned["visa_type"] in STUDENT_VISA_CLASSES:
         letter = cleaned["visa_type"][0]
-        if not re.search(rf"(?<![A-Z0-9]){letter}-?1(?![0-9])", printed):
-            errors.append(f"The visa class {cleaned['visa_type']} could not be found on the visa document.")
-    if issue and _foil_date(issue) not in compact:
-        errors.append("The issue date you entered does not match the issue date on the visa.")
+        if not re.search(rf"(?<![A-Z0-9]){letter}-?[1I](?![A-Z0-9])", printed):
+            errors.append(f"The visa class {cleaned['visa_type']} could not be read on the visa document.")
+    if issue:
+        wanted = _foil_date(issue).translate(_TO_DIGIT)
+        if wanted not in re.sub(r"\s+", "", printed).translate(_TO_DIGIT):
+            errors.append("The issue date you entered does not match (or could not be read from) the visa.")
 
+    if errors and source == "ocr":
+        errors.append("If your details are correct, the image may not be clear enough to read - "
+                      "a sharper, well-lit photo or scan of the whole visa page may pass.")
     return (not errors), cleaned, errors

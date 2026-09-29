@@ -1,0 +1,16 @@
+# Placeholder that satisfies rapidocr-onnxruntime's "opencv-python" dependency
+# WITHOUT installing the GUI build of OpenCV (which needs libGL/X11 and fails to
+# import on Render's Python runtime). The real cv2 module comes from
+# opencv-python-headless, listed in requirements.txt. This package installs no files.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "opencv-python"
+version = "4.99.0"
+description = "Empty placeholder: cv2 is provided by opencv-python-headless."
+
+[tool.setuptools]
+packages = []
+py-modules = []
