@@ -1,0 +1,138 @@
+{# System Capacity section - included by admin/dashboard.html and admin/capacity.html.
+   Expects `capacity` from capacity_monitor.dashboard_snapshot(); may be None. #}
+{% set badge = {'normal': ('🟢', 'NORMAL', 'success'), 'warning': ('🟡', 'WARNING', 'warning'),
+                'critical': ('🔴', 'CRITICAL', 'danger'), 'unknown': ('⚪', 'NO DATA YET', 'secondary'),
+                'unavailable': ('⚪', 'UNAVAILABLE', 'secondary')} %}
+<div class="card asb-card mb-4" id="system-capacity">
+  <div class="card-body">
+  {% if not capacity %}
+    <h5 class="fw-bold mb-1">🖥️ System Capacity</h5>
+    <p class="text-muted small mb-0">Capacity monitoring is temporarily unavailable. The website itself is not affected.</p>
+  {% else %}
+    {% set st = badge.get(capacity.status, badge['unknown']) %}
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+      <div>
+        <h5 class="fw-bold mb-1">🖥️ System Capacity</h5>
+        <div class="small text-muted">
+          {% if capacity.at_iso %}Last check {{ capacity.at_iso.replace('T', ' ').replace('Z', ' UTC') }}
+            ({{ capacity.age_seconds }} s ago){% else %}Waiting for the first check (runs every
+            {{ capacity.config.sample_seconds|int }} s once the site receives traffic).{% endif %}
+          {% if not capacity.enabled %} · <strong>monitoring disabled (CAPACITY_MONITOR_ENABLED=0)</strong>{% endif %}
+        </div>
+      </div>
+      <span class="badge bg-{{ st[2] }} fs-6 px-3 py-2">{{ st[0] }} {{ st[1] }}</span>
+    </div>
+    {% if capacity.degraded %}<div class="alert alert-secondary small py-2">⚠ {{ capacity.degraded }}</div>{% endif %}
+    {% for h in capacity.setup_hints or [] %}<div class="alert alert-info small py-2 mb-2">ℹ️ {{ h }}</div>{% endfor %}
+
+    <div class="row g-3">
+    {% for r in capacity.rows if r.value is not none or r.warning or r.critical %}
+      {% set lv = badge.get(r.level, badge['unavailable']) %}
+      <div class="col-md-6 col-xl-4">
+        <div class="border rounded p-2 h-100">
+          <div class="d-flex justify-content-between small">
+            <span class="fw-semibold">{{ r.label }}</span>
+            <span class="text-{{ lv[2] }}">{{ lv[0] }} {{ r.display }}</span>
+          </div>
+          {% if r.unit == '%' and r.value is not none %}
+            <div class="progress mt-1" style="height: 8px;" role="progressbar" aria-label="{{ r.label }}"
+                 aria-valuenow="{{ r.value }}" aria-valuemin="0" aria-valuemax="100">
+              <div class="progress-bar bg-{{ lv[2] }}" style="width: {{ [r.value, 100]|min }}%"></div>
+            </div>
+          {% endif %}
+          <div class="text-muted" style="font-size: .75rem;">
+            {% if r.warning or r.critical %}Warning {{ r.warning|round(0)|int if r.warning else '—' }}{{ r.unit }} ·
+              Critical {{ r.critical|round(0)|int if r.critical else '—' }}{{ r.unit }}{% else %}No alert threshold set{% endif %}
+            {% if r.value is none %} · not measurable right now{% endif %}
+          </div>
+          {% if r.alert_level in ('warning', 'critical') %}
+            <div class="small fw-semibold text-{{ 'danger' if r.alert_level == 'critical' else 'warning' }}">🔔 {{ r.alert_level|upper }} alert active</div>
+          {% elif r.pending %}
+            <div class="small text-muted">⏳ alerts if it stays this high for {{ r.sustain }} checks in a row</div>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+    </div>
+
+    {% set m = capacity.metrics %}
+    <div class="row g-2 mt-2 small">
+      <div class="col-md-6">
+        <ul class="list-unstyled mb-0">
+          <li><strong>Recently Active Users:</strong> {{ m.active_users if m.active_users is not none else '—' }}
+            <span class="text-muted">(signed-in accounts seen in the last {{ capacity.config.active_user_minutes|int }} min;
+            {{ m.active_students if m.active_students is not none else '—' }} students)</span></li>
+          <li class="text-muted">This is <em>not</em> an exact count of simultaneous users - visitors who are not signed in,
+            and people reading a page without clicking, cannot be counted reliably.</li>
+          <li><strong>Concurrent requests (peak, last {{ capacity.config.sample_seconds|int }} s):</strong>
+            {{ m.concurrent_requests if m.concurrent_requests is not none else '—' }}</li>
+          <li><strong>Requests:</strong> {{ m.requests if m.requests is not none else '—' }} in the last
+            {{ m.window_minutes or (capacity.config.window_seconds / 60)|int }} min
+            ({{ m.requests_per_minute if m.requests_per_minute is not none else '—' }}/min)</li>
+          <li><strong>Response time:</strong> average {{ m.latency_avg_ms if m.latency_avg_ms is not none else '—' }} ms ·
+            p95 ≤ {{ m.latency_p95_ms|int if m.latency_p95_ms is not none else '—' }} ms
+            {% if m.rates_note %}<span class="text-muted">(error rate/p95 need more traffic: {{ m.rates_note }})</span>{% endif %}</li>
+        </ul>
+      </div>
+      <div class="col-md-6">
+        <ul class="list-unstyled mb-0">
+          <li><strong>Database:</strong>
+            {% if m.db_latency_ms is not none %}{{ '🟢 healthy' if not m.db_errors else '🔴 errors: ' ~ m.db_errors }}
+              ({{ m.db_latency_ms }} ms){% else %}—{% endif %}
+            <span class="text-muted">· SQLite has no connection pool, so "connections" isn't measurable</span></li>
+          <li><strong>Visa reader (OCR):</strong> queue {{ m.ocr_queue if m.ocr_queue is not none else '—' }} ·
+            running {{ m.ocr_running if m.ocr_running is not none else '—' }} ·
+            {{ m.ocr_jobs or 0 }} job(s), avg {{ m.ocr_avg_seconds if m.ocr_avg_seconds is not none else '—' }} s,
+            max {{ m.ocr_max_seconds if m.ocr_max_seconds is not none else '—' }} s ·
+            busy/timeout failures {{ m.ocr_unavailable or 0 }}</li>
+          <li><strong>Memory:</strong> {{ m.memory_used_mb if m.memory_used_mb is not none else '—' }} MB
+            of {{ m.memory_limit_mb if m.memory_limit_mb else 'unknown limit' }}{{ ' MB' if m.memory_limit_mb }} ·
+            <strong>CPU limit:</strong> {{ m.cpu_limit_cores or '—' }} cores <span class="text-muted">({{ m.cpu_limit_source or '—' }})</span></li>
+          <li><strong>Storage:</strong>
+            {% for name, d in (m.storage_disks or {}).items() %}{{ name }} {{ d.percent if d else '—' }}%{% if d %} ({{ d.used_gb }}/{{ d.total_gb }} GB){% endif %}{{ ', ' if not loop.last }}{% endfor %}
+            {% if capacity.uploads %}· uploads: {{ capacity.uploads.files }} files, {{ capacity.uploads.mb }} MB{% endif %}</li>
+          <li><strong>Network:</strong> {{ (m.network_kbps ~ ' KB/s') if m.network_kbps is not none else 'not measurable from inside the app' }}
+            <span class="text-muted">· use Render → Metrics for bandwidth</span></li>
+          <li class="text-muted">Reporting: {{ m.instances_reporting or 0 }} instance(s), {{ m.workers_reporting or 0 }} worker(s).</li>
+        </ul>
+      </div>
+    </div>
+
+    {% if capacity.infrastructure_warnings %}
+    <div class="alert alert-warning small mt-3 mb-0">
+      <strong>Infrastructure notes</strong>
+      <ul class="mb-0">{% for w in capacity.infrastructure_warnings %}<li>{{ w }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+
+    {% if show_events %}
+    <h6 class="fw-bold mt-4">Capacity events (latest 25)</h6>
+    <div class="table-responsive">
+      <table class="table table-sm small align-middle">
+        <thead><tr><th>Time (UTC)</th><th>Level</th><th>Metric</th><th>Value</th><th>Threshold</th><th>Message</th><th>E-mail</th></tr></thead>
+        <tbody>
+        {% for e in capacity.events %}
+          <tr>
+            <td class="text-nowrap">{{ e.created_at.replace('T', ' ').replace('Z', '') }}</td>
+            <td><span class="badge bg-{{ {'warning': 'warning text-dark', 'critical': 'danger', 'recovered': 'success', 'test': 'info text-dark'}.get(e.level, 'secondary') }}">{{ e.level }}</span></td>
+            <td>{{ e.metric }}</td>
+            <td>{{ e.value if e.value is not none else '—' }}</td>
+            <td>{{ e.threshold if e.threshold is not none else '—' }}</td>
+            <td>{{ e.message }}</td>
+            <td>{% if e.notification_sent %}✅ sent{% elif e.notification_error %}❌ not sent: {{ {'not_configured': 'e-mail not configured (MAIL_* on Render)', 'send_failed': 'mail server error', 'send_exception': 'mail server error', 'invalid_recipient': 'invalid alert address'}.get(e.notification_error, e.notification_error) }}{% else %}—{% endif %}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="7" class="text-muted text-center">No capacity events yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="d-flex justify-content-between align-items-center mt-3 small">
+      <span class="text-muted">{{ capacity.events|length }} recent capacity event(s){% if capacity.events %}; latest: {{ capacity.events[0].message }}{% endif %}</span>
+      <a href="{{ url_for('admin_capacity') }}" class="btn btn-sm btn-outline-secondary">Details &amp; alert history &rarr;</a>
+    </div>
+    {% endif %}
+  {% endif %}
+  </div>
+</div>

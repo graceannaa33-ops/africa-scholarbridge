@@ -415,7 +415,6 @@ def test_oversized_visa_file_goes_to_assistance_not_a_cut_connection(client, stu
 def test_other_routes_keep_the_8mb_request_limit(client, student):
     """Only the visa upload route accepts a larger request body; everything
     else (e.g. M-PESA payment screenshots) is unchanged."""
-    import io as _io
     import app as app_module
     with app_module.app.test_request_context("/student-visa/payment/1/submit", method="POST"):
         from flask import request

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}System Capacity — Africa ScholarBridge{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1"><i class="bi bi-speedometer2"></i> System Capacity</h2>
+  <p class="text-muted mb-4">Early warnings for when the website approaches its infrastructure limits.
+    Alerts go to <strong>{{ capacity.config.alert_email if capacity else '—' }}</strong>.</p>
+
+  {% include 'admin/_nav.html' %}
+
+  {% set show_events = True %}
+  {% include 'admin/_capacity.html' %}
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <h5 class="fw-bold">Test the alert e-mail</h5>
+      <p class="small text-muted mb-3">Sends one clearly-labelled <strong>[TEST]</strong> e-mail to the alert address and records it
+        above. It does not change any thresholds or alert state.</p>
+      <form method="POST" action="{{ url_for('admin_capacity_test_alert') }}">
+        <button type="submit" class="btn btn-outline-primary">Send test alert e-mail</button>
+      </form>
+      {% if capacity %}
+      <hr>
+      <p class="small text-muted mb-1"><strong>Alert rules:</strong>
+        checked every {{ capacity.config.sample_seconds|int }} s ·
+        a metric must stay high for its "sustain" number of checks before alerting ·
+        the same alert is not repeated within {{ capacity.config.cooldown_minutes|int }} min ·
+        a CRITICAL alert is always sent even if a warning was just sent ·
+        recovery needs {{ capacity.config.recovery_samples }} normal checks{{ ' and sends a recovery e-mail' if capacity.config.send_recovery_email }}.
+        Thresholds are set with CAPACITY_* environment variables on Render.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1005,6 +1005,61 @@ def _init_db():
         if col not in existing_cols:
             _add_column(cur, "funding_applications", col, definition)
 
+    # ---------------------------------------------------------------
+    # CAPACITY MONITORING (capacity_monitor.py). Small, self-pruning
+    # tables; nothing here holds personal data beyond an internal
+    # "role:user_id" key for the Recently Active Users count.
+    # ---------------------------------------------------------------
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS capacity_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL,
+            worker TEXT NOT NULL,
+            created_at REAL NOT NULL,          -- unix time
+            data TEXT NOT NULL                 -- JSON: one worker's counters for one interval
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_capacity_samples_created ON capacity_samples(created_at)")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS capacity_active_users (
+            user_key TEXT PRIMARY KEY,         -- e.g. 'student:12' (no names/emails)
+            last_seen REAL NOT NULL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS capacity_alert_state (
+            metric TEXT PRIMARY KEY,
+            level TEXT NOT NULL DEFAULT 'normal',
+            pending_level TEXT,
+            pending_count INTEGER NOT NULL DEFAULT 0,
+            since REAL,
+            last_value REAL,
+            last_notified_level TEXT,
+            last_notified_at REAL,
+            last_attempt_at REAL
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS capacity_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,          -- ISO 8601 UTC
+            level TEXT NOT NULL,               -- warning / critical / recovered / info / test
+            metric TEXT NOT NULL,
+            value REAL,
+            threshold REAL,
+            message TEXT NOT NULL,
+            notification_sent INTEGER NOT NULL DEFAULT 0,
+            notification_error TEXT
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_capacity_events_created ON capacity_events(created_at)")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS capacity_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+
     ensure_reference_data(cur)
 
     conn.commit()

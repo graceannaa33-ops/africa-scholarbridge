@@ -288,39 +288,87 @@ def read_document_contents(file_bytes, ext):
     library, crash, timeout, memory limit, server busy. The caller treats
     that as unreadable, i.e. FAIL."""
     import tempfile
-    with _OcrLock() as acquired:
+    _metric("ocr_waiting_started")
+    lock = _OcrLock()
+    try:
+        acquired = lock.__enter__()
+    except BaseException:
+        _metric("ocr_waiting_finished", False)
+        raise
+    with _released(lock):
+        _metric("ocr_waiting_finished", acquired)
         if not acquired:
             return None, None, None
-        with tempfile.TemporaryDirectory(prefix="visa-read-") as tmp:
-            src = os.path.join(tmp, "document")
-            out = os.path.join(tmp, "result.json")
-            with open(src, "wb") as fh:
-                fh.write(file_bytes)
-            try:
-                with open(out, "wb") as out_fh:
-                    proc = subprocess.Popen(
-                        [sys.executable, _OCR_WORKER, src, ext, str(OCR_WORK_BUDGET_SECONDS)],
-                        stdin=subprocess.DEVNULL, stdout=out_fh, stderr=subprocess.DEVNULL,
-                        close_fds=True, env=_OCR_ENV,
-                    )
-                    started = time.monotonic()
-                    while proc.poll() is None:
-                        if (time.monotonic() - started > OCR_TIMEOUT_SECONDS
-                                or _rss_mb(proc.pid) > OCR_MAX_RSS_MB):
-                            proc.kill()
-                            proc.wait()
-                            return None, None, None
-                        time.sleep(0.05)
-                if proc.returncode != 0:
-                    return None, None, None
-                with open(out, "rb") as fh:
-                    result = json.loads(fh.read().decode("utf-8") or "{}")
-            except (OSError, ValueError):
-                return None, None, None
+        started_at = time.monotonic()
+        readable = False
+        try:
+            result = _run_reader(file_bytes, ext, tempfile)
+            readable = result is not None
+        finally:
+            _metric("ocr_job_finished", time.monotonic() - started_at, readable)
+    if result is None:
+        return None, None, None
     if result.get("error"):
         return None, None, _READ_ERRORS.get(result["error"], "The document could not be read.")
     lines = result.get("ocr_lines") or []
     return str(result.get("text_layer") or ""), "\n".join(str(x) for x in lines), None
+
+
+class _released:
+    """Context manager that releases an already-entered _OcrLock."""
+
+    def __init__(self, lock):
+        self.lock = lock
+
+    def __enter__(self):
+        return self.lock
+
+    def __exit__(self, *exc):
+        self.lock.__exit__(*exc)
+        return False
+
+
+def _metric(name, *args):
+    """Capacity-monitor hook (queue length, processing time). Monitoring
+    can never affect the verification result."""
+    try:
+        import capacity_monitor
+        getattr(capacity_monitor, name)(*args)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _run_reader(file_bytes, ext, tempfile):
+    """Runs the reader subprocess (caller holds the lock). Returns its JSON
+    result dict, or None when the document could not be read for a
+    technical reason (crash, timeout, memory watchdog, bad output)."""
+    with tempfile.TemporaryDirectory(prefix="visa-read-") as tmp:
+        src = os.path.join(tmp, "document")
+        out = os.path.join(tmp, "result.json")
+        with open(src, "wb") as fh:
+            fh.write(file_bytes)
+        try:
+            with open(out, "wb") as out_fh:
+                proc = subprocess.Popen(
+                    [sys.executable, _OCR_WORKER, src, ext, str(OCR_WORK_BUDGET_SECONDS)],
+                    stdin=subprocess.DEVNULL, stdout=out_fh, stderr=subprocess.DEVNULL,
+                    close_fds=True, env=_OCR_ENV,
+                )
+                started = time.monotonic()
+                while proc.poll() is None:
+                    if (time.monotonic() - started > OCR_TIMEOUT_SECONDS
+                            or _rss_mb(proc.pid) > OCR_MAX_RSS_MB):
+                        proc.kill()
+                        proc.wait()
+                        return None
+                    time.sleep(0.05)
+            if proc.returncode != 0:
+                return None
+            with open(out, "rb") as fh:
+                result = json.loads(fh.read().decode("utf-8") or "{}")
+        except (OSError, ValueError):
+            return None
+    return result if isinstance(result, dict) else None
 
 
 # ---------------------------------------------------------------------

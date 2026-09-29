@@ -18,6 +18,8 @@
     </div>
   </div>
 
+  {% include 'admin/_capacity.html' %}
+
   <div class="row g-3 my-2">
     {% for label, value in [
         ('Total Students', stats.students), ('Applications', stats.applications), ('Under Review', stats.under_review),

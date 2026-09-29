@@ -31,6 +31,7 @@ import banks_lib
 import email_lib
 import mpesa_parser
 import visa_verification as visa_verify
+import capacity_monitor
 import json
 
 app = Flask(__name__)
@@ -117,6 +118,11 @@ class _AppRequest(app.request_class):
 
 
 app.request_class = _AppRequest
+
+# Capacity monitoring: lightweight request counters + a background sampler
+# that e-mails the main admin as the service approaches its limits. It
+# never raises into requests (see capacity_monitor.py).
+capacity_monitor.init_app(app)
 
 # File-type, size, signature and content checks live in visa_verification.py.
 
@@ -2566,9 +2572,39 @@ def admin_dashboard():
     visa_payments_pending = db.execute(
         "SELECT COUNT(*) c FROM visa_payments WHERE payment_status = 'PAYMENT_PENDING'"
     ).fetchone()["c"]
+    capacity = _capacity_snapshot_or_none(db)
     return render_template("admin/dashboard.html", stats=stats, cycle=cycle,
                            visa_payments_pending=visa_payments_pending,
-                            upcoming=upcoming, recent_applications=recent_applications)
+                            upcoming=upcoming, recent_applications=recent_applications,
+                           capacity=capacity)
+
+
+def _capacity_snapshot_or_none(db):
+    """The System Capacity section must never break the admin dashboard."""
+    try:
+        return capacity_monitor.dashboard_snapshot(db)
+    except Exception:  # noqa: BLE001
+        app.logger.exception("Capacity snapshot failed (dashboard still shown).")
+        return None
+
+
+@app.route("/admin/capacity")
+@admin_required
+def admin_capacity():
+    return render_template("admin/capacity.html", capacity=_capacity_snapshot_or_none(g.db))
+
+
+@app.route("/admin/capacity/test-alert", methods=["POST"])
+@admin_required
+def admin_capacity_test_alert():
+    ok, err = capacity_monitor.send_test_alert(g.db)
+    if ok:
+        flash("Test capacity alert e-mail sent. Check the admin inbox.", "success")
+    elif err == "not_configured":
+        flash("Test alert NOT sent: outgoing e-mail is not configured (MAIL_* settings on Render).", "danger")
+    else:
+        flash("Test alert NOT sent: the e-mail server rejected or could not be reached. See Render logs.", "danger")
+    return redirect(url_for("admin_capacity"))
 
 
 @app.route("/admin/applications")
