@@ -145,6 +145,79 @@ def save_visa_document(file_storage, original_filename):
     file_storage.save(os.path.join(VISA_DOCS_DIR, stored_filename))
     return stored_filename, None
 
+
+# Shown whenever a "Yes, I already have my visa" submission fails, next to
+# the "I do not have a visa" button (see application_visa_step.html).
+VISA_VERIFICATION_FAILED_MESSAGE = (
+    "We could not verify the visa information provided. Please check your "
+    "information or select 'I do not have a visa' to continue."
+)
+# Session key holding the funding_applications.id whose visa upload last
+# failed validation - scoped to one application, cleared on success or on
+# switching to the no-visa path.
+VISA_FAILED_SESSION_KEY = "visa_verification_failed_app_id"
+
+_VISA_TYPE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./()\-]{0,29}$")
+_PASSPORT_RE = re.compile(r"^[A-Za-z0-9]{6,12}$")
+
+
+def _parse_iso_date(value):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def validate_visa_details(form):
+    """Validates the text details submitted with a visa document (Path A).
+    Returns (cleaned, errors): `cleaned` is always the student's input
+    (so it can be kept for a retry); `errors` is a list of messages.
+    """
+    cleaned = {
+        "visa_type": form.get("visa_type_category", "").strip(),
+        "passport_number": re.sub(r"\s+", "", form.get("passport_number", "")).upper(),
+        "issue_date": (form.get("visa_issue_date") or "").strip() or None,
+        "expiry_date": (form.get("visa_expiry_date") or "").strip() or None,
+        "notes": form.get("additional_info", "").strip(),
+    }
+    errors = []
+    today = date.today()
+
+    if not cleaned["visa_type"]:
+        errors.append("Visa type / category is required (e.g. F-1, J-1).")
+    elif not _VISA_TYPE_RE.match(cleaned["visa_type"]):
+        errors.append("Visa type / category doesn't look valid (e.g. F-1, J-1).")
+
+    if not cleaned["passport_number"]:
+        errors.append("Passport number is required.")
+    elif not _PASSPORT_RE.match(cleaned["passport_number"]):
+        errors.append("Passport number must be 6-12 letters/numbers.")
+
+    expiry = _parse_iso_date(cleaned["expiry_date"])
+    if not cleaned["expiry_date"]:
+        errors.append("Visa expiry date is required.")
+    elif not expiry:
+        errors.append("Visa expiry date is not a valid date.")
+    elif expiry < today:
+        errors.append("This visa has already expired.")
+
+    if cleaned["issue_date"]:
+        issue = _parse_iso_date(cleaned["issue_date"])
+        if not issue:
+            errors.append("Visa issue date is not a valid date.")
+        elif issue > today:
+            errors.append("Visa issue date cannot be in the future.")
+        elif expiry and issue >= expiry:
+            errors.append("Visa issue date must be before the expiry date.")
+
+    return cleaned, errors
+
+
+def _visa_upload_incomplete(application):
+    """True when the student chose "Yes, I already have my visa" but no
+    valid visa has been accepted yet (the step isn't COMPLETE)."""
+    return application["visa_status"] == "HAS_VISA" and application["visa_step_status"] != "COMPLETE"
+
 PAYMENT_PROOF_DIR = os.path.join(UPLOAD_ROOT, "payment_proofs")
 os.makedirs(PAYMENT_PROOF_DIR, exist_ok=True)
 ALLOWED_PAYMENT_PROOF_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
@@ -1201,6 +1274,13 @@ def application_step(step_name):
 
     step_index = APPLICATION_STEPS.index(step_name)
 
+    # A student who chose "Yes, I already have my visa" can't move past the
+    # visa step until a valid visa has been accepted - otherwise typing a
+    # later step's URL would let them continue as if they had a valid visa.
+    if step_index > APPLICATION_STEPS.index("visa") and _visa_upload_incomplete(application):
+        flash(VISA_VERIFICATION_FAILED_MESSAGE, "warning")
+        return redirect(url_for("application_step", step_name="visa"))
+
     # ---------------------------------------------------------------
     # 🇺🇸 VISA STEP - handled separately from the generic "save fields,
     # advance to next step" flow below, because its two answers behave
@@ -1221,7 +1301,13 @@ def application_step(step_name):
             # Answering the question again once a path is already under way
             # (or done) is a no-op - just send them to whatever state
             # they're actually in, never reset progress or double-charge.
-            if application["visa_step_status"] in ("ACTION_REQUIRED", "COMPLETE"):
+            # ONE exception: a student on the "Yes" path whose visa has NOT
+            # been accepted yet may switch to "I do not have a visa". That
+            # reuses this same application (and the same visa_requests row
+            # via get_or_create_integrated_visa_request), so nothing is
+            # duplicated and their earlier answers are kept.
+            switching_to_no_visa = choice == "no" and _visa_upload_incomplete(application)
+            if application["visa_step_status"] in ("ACTION_REQUIRED", "COMPLETE") and not switching_to_no_visa:
                 return redirect(url_for("application_step", step_name="visa"))
 
             if choice == "yes":
@@ -1240,13 +1326,20 @@ def application_step(step_name):
             elif choice == "no":
                 # PATH B: "No, I need visa assistance" -> pay Africa
                 # ScholarBridge's service fee.
+                # Any half-entered "Yes" visa details are cleared - they no
+                # longer apply (no file is ever stored unless the upload
+                # passed, so there's nothing on disk to remove).
                 db.execute(
                     """UPDATE funding_applications
                        SET visa_required = 1, visa_status = 'NEEDS_ASSISTANCE', visa_assistance_required = 1,
-                           visa_step_status = 'ACTION_REQUIRED', last_updated = CURRENT_TIMESTAMP WHERE id = ?""",
+                           visa_step_status = 'ACTION_REQUIRED',
+                           visa_document_type = NULL, visa_document_issue_date = NULL,
+                           visa_document_expiry_date = NULL, visa_document_passport_number = NULL,
+                           visa_document_notes = NULL, last_updated = CURRENT_TIMESTAMP WHERE id = ?""",
                     (application["id"],),
                 )
                 db.commit()
+                session.pop(VISA_FAILED_SESSION_KEY, None)
                 visa_request_id = get_or_create_integrated_visa_request(db, student, application, cycle)
                 db.commit()
                 if not visa_request_id:
@@ -1274,6 +1367,9 @@ def application_step(step_name):
             format_price=visa_lib.format_price,
             allowed_visa_doc_extensions=sorted(ALLOWED_VISA_DOC_EXTENSIONS),
             max_visa_doc_mb=MAX_VISA_DOC_SIZE_BYTES // (1024 * 1024),
+            visa_verification_failed=(session.get(VISA_FAILED_SESSION_KEY) == application["id"]
+                                      and _visa_upload_incomplete(application)),
+            visa_verification_failed_message=VISA_VERIFICATION_FAILED_MESSAGE,
         )
 
     # ---------------------------------------------------------------
@@ -1527,13 +1623,35 @@ def application_visa_document_upload():
         return redirect(url_for("application_step", step_name="visa"))
 
     uploaded_file = request.files.get("visa_document")
+    details, errors = validate_visa_details(request.form)
     if not uploaded_file or not uploaded_file.filename:
-        flash("Please choose a file to upload.", "warning")
-        return redirect(url_for("application_step", step_name="visa"))
+        errors.insert(0, "Please choose your visa document to upload.")
 
-    stored_filename, error = save_visa_document(uploaded_file, uploaded_file.filename)
-    if error:
-        flash(error, "danger")
+    stored_filename = None
+    if not errors:
+        # Only store the file once every detail has passed, so a failed
+        # attempt never leaves an orphaned file on the disk.
+        stored_filename, file_error = save_visa_document(uploaded_file, uploaded_file.filename)
+        if file_error:
+            errors.append(file_error)
+
+    if errors:
+        # Validation failed: do NOT mark the visa step complete. Keep what
+        # the student typed (so a retry is easy), remember the failure for
+        # this application, and send them back to the visa step, which now
+        # shows the "I do not have a visa" option.
+        db.execute(
+            """UPDATE funding_applications
+               SET visa_document_type = ?, visa_document_issue_date = ?, visa_document_expiry_date = ?,
+                   visa_document_passport_number = ?, visa_document_notes = ?, last_updated = CURRENT_TIMESTAMP
+               WHERE id = ?""",
+            (details["visa_type"] or None, details["issue_date"], details["expiry_date"],
+             details["passport_number"] or None, details["notes"] or None, application["id"]),
+        )
+        db.commit()
+        session[VISA_FAILED_SESSION_KEY] = application["id"]
+        for message in errors:
+            flash(message, "danger")
         return redirect(url_for("application_step", step_name="visa"))
 
     db.execute(
@@ -1543,13 +1661,14 @@ def application_visa_document_upload():
                visa_document_issue_date = ?, visa_document_expiry_date = ?, visa_document_passport_number = ?,
                visa_document_notes = ?, visa_step_status = 'COMPLETE', last_updated = CURRENT_TIMESTAMP
            WHERE id = ?""",
-        (stored_filename, uploaded_file.filename, request.form.get("visa_type_category", "").strip(),
-         request.form.get("visa_issue_date") or None, request.form.get("visa_expiry_date") or None,
-         request.form.get("passport_number", "").strip(), request.form.get("additional_info", "").strip(),
+        (stored_filename, uploaded_file.filename, details["visa_type"],
+         details["issue_date"], details["expiry_date"],
+         details["passport_number"], details["notes"],
          application["id"]),
     )
     add_notification(db, student["id"], "✅ Your U.S. student visa document was uploaded successfully.")
     db.commit()
+    session.pop(VISA_FAILED_SESSION_KEY, None)
     flash("✅ Visa Document Uploaded - your U.S. student visa document has been recorded.", "success")
     return redirect(url_for("application_step", step_name="visa"))
 
@@ -1644,6 +1763,12 @@ def application_submit():
     ).fetchone()
     if not application or application["status"] != "Draft":
         return redirect(url_for("dashboard"))
+
+    # Same rule as the later application steps: no submitting on the
+    # "Yes, I have a visa" path until a valid visa has been accepted.
+    if _visa_upload_incomplete(application):
+        flash(VISA_VERIFICATION_FAILED_MESSAGE, "warning")
+        return redirect(url_for("application_step", step_name="visa"))
 
     if request.method == "POST":
         ref = generate_reference_number(db, cycle["year"].split("/")[0])
@@ -3748,6 +3873,19 @@ def server_error(e):
 @app.errorhandler(413)
 def file_too_large(e):
     flash(f"That file is too large. Please upload a file under {MAX_VISA_DOC_SIZE_BYTES // (1024*1024)} MB.", "danger")
+    if request.path == url_for("application_visa_document_upload"):
+        # An oversized visa document is a failed visa submission too - show
+        # the "I do not have a visa" option on the visa step.
+        student = current_student() if session.get("role") == "student" and g.get("db") is not None else None
+        cycle = get_current_cycle() if student else None
+        if student and cycle:
+            app_row = g.db.execute(
+                "SELECT id FROM funding_applications WHERE student_id = ? AND cycle_id = ?",
+                (student["id"], cycle["id"]),
+            ).fetchone()
+            if app_row:
+                session[VISA_FAILED_SESSION_KEY] = app_row["id"]
+        return redirect(url_for("application_step", step_name="visa"))
     return redirect(request.referrer or url_for("dashboard"))
 
 
