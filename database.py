@@ -1060,6 +1060,28 @@ def _init_db():
         )
     """)
 
+    # ---------------------------------------------------------------
+    # ADMIN AUDIT LOG - one row per administrative action such as a
+    # student account deletion (account_moderation.py). Deliberately has
+    # NO foreign keys, so the record survives the deletion it describes.
+    # Stores the student's ids and a masked e-mail only, not their data.
+    # ---------------------------------------------------------------
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,   -- UTC
+            admin_user_id INTEGER,
+            admin_email TEXT NOT NULL,
+            action TEXT NOT NULL,                                  -- e.g. 'delete_student_account'
+            target_user_id INTEGER,
+            target_student_id INTEGER,
+            target_label TEXT,                                     -- masked e-mail, e.g. a***@gmail.com
+            reason TEXT NOT NULL,
+            details TEXT                                           -- JSON: what was removed
+        )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_log_created ON admin_audit_log(created_at)")
+
     ensure_reference_data(cur)
 
     conn.commit()

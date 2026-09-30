@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Admin — Account Management{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">User Accounts</h2>
+  <p class="text-muted mb-3">Account Management — student accounts only. Admin and Visa Admin accounts are not listed here.</p>
+  {% include 'admin/_nav.html' %}
+
+  <form method="GET" class="card asb-card p-3 mb-3" role="search">
+    <div class="row g-2">
+      <div class="col-md-9">
+        <input type="search" name="q" class="form-control" maxlength="100" aria-label="Search accounts"
+               placeholder="Search by name, email or phone number..." value="{{ search }}">
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary flex-grow-1">Search</button>
+        {% if search %}<a href="{{ url_for('admin_accounts') }}" class="btn btn-outline-secondary">Clear</a>{% endif %}
+      </div>
+    </div>
+  </form>
+
+  <div class="card asb-card mb-4">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-2 small text-muted">
+        <span>{{ total }} student account{{ '' if total == 1 else 's' }}{% if search %} matching “{{ search }}”{% endif %}</span>
+        <span>Page {{ page }} of {{ pages }}</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead><tr>
+            <th>Name</th><th>Email</th><th>Phone</th><th>Created</th><th>Status</th>
+            <th class="text-center">Applications</th><th>Last activity</th><th></th>
+          </tr></thead>
+          <tbody>
+          {% for a in accounts %}
+            <tr>
+              <td>{{ a.full_name }}</td>
+              <td>{{ a.email }}</td>
+              <td>{{ a.phone or '—' }}</td>
+              <td class="text-nowrap small">{{ (a.created_at or '')[:10] }}</td>
+              <td><span class="badge bg-success">{{ a.status }}</span></td>
+              <td class="text-center">{{ a.applications }}</td>
+              <td class="small text-muted text-nowrap">{{ a.last_activity or '—' }}</td>
+              <td class="text-end text-nowrap">
+                <a href="{{ url_for('admin_account_detail', user_id=a.user_id) }}" class="btn btn-sm btn-outline-primary">View details</a>
+                <a href="{{ url_for('admin_account_detail', user_id=a.user_id, delete=1) }}" class="btn btn-sm btn-outline-danger">Permanently delete…</a>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8" class="text-muted text-center py-3">No student accounts found.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="small text-muted mb-2">“Last activity” shows only activity seen in the last 24 hours (from capacity monitoring); older logins are not recorded.</p>
+
+      {% if pages > 1 %}
+      <nav aria-label="Account pages">
+        <ul class="pagination pagination-sm mb-0 flex-wrap">
+          <li class="page-item {{ 'disabled' if page <= 1 }}">
+            <a class="page-link" href="{{ url_for('admin_accounts', q=search or None, page=page - 1) }}">&laquo; Previous</a></li>
+          {% for p in range(1, pages + 1) %}
+            {% if p == 1 or p == pages or (p - page)|abs <= 2 %}
+              <li class="page-item {{ 'active' if p == page }}"><a class="page-link" href="{{ url_for('admin_accounts', q=search or None, page=p) }}">{{ p }}</a></li>
+            {% elif (p - page)|abs == 3 %}
+              <li class="page-item disabled"><span class="page-link">…</span></li>
+            {% endif %}
+          {% endfor %}
+          <li class="page-item {{ 'disabled' if page >= pages }}">
+            <a class="page-link" href="{{ url_for('admin_accounts', q=search or None, page=page + 1) }}">Next &raquo;</a></li>
+        </ul>
+      </nav>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card asb-card">
+    <div class="card-body">
+      <h5 class="fw-bold mb-3">Deletion audit log <span class="text-muted small fw-normal">(latest 20)</span></h5>
+      <div class="table-responsive">
+        <table class="table table-sm small align-middle">
+          <thead><tr><th>Date/time (UTC)</th><th>Admin</th><th>Action</th><th>Student account</th><th>Reason</th></tr></thead>
+          <tbody>
+          {% for e in audit %}
+            <tr>
+              <td class="text-nowrap">{{ e.created_at }}</td>
+              <td>{{ e.admin_email }}</td>
+              <td>{{ 'Deleted student account' if e.action == 'delete_student_account' else e.action }}</td>
+              <td class="text-nowrap">User #{{ e.target_user_id }} · Student #{{ e.target_student_id }} · {{ e.target_label }}</td>
+              <td>{{ e.reason }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5" class="text-muted text-center py-2">No administrative deletions yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

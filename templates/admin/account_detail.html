@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Admin — Student Account{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h2 class="fw-bold mb-1">User Accounts</h2>
+  <p class="mb-3"><a href="{{ url_for('admin_accounts') }}">&larr; Back to Account Management</a></p>
+  {% include 'admin/_nav.html' %}
+
+  <div class="row g-4">
+    <div class="col-lg-7">
+      <div class="card asb-card h-100">
+        <div class="card-body">
+          <h4 class="fw-bold mb-1">{{ account.full_name }}</h4>
+          <p class="text-muted mb-3">Student account · User #{{ account.user_id }} · Student #{{ account.student_id }}</p>
+          <table class="table table-sm mb-4">
+            <tr><th class="w-25">Email</th><td>{{ account.email }}</td></tr>
+            <tr><th>Phone</th><td>{{ account.phone or '—' }}</td></tr>
+            <tr><th>Country</th><td>{{ account.country or '—' }}</td></tr>
+            <tr><th>Created</th><td>{{ account.created_at }} UTC</td></tr>
+            <tr><th>Status</th><td><span class="badge bg-success">{{ account.status }}</span></td></tr>
+            <tr><th>Last activity</th><td>{{ account.last_activity or '— (not seen in the last 24 hours)' }}</td></tr>
+          </table>
+
+          <h6 class="fw-bold">Applications ({{ account.applications|length }})</h6>
+          <table class="table table-sm small">
+            <thead><tr><th>Reference</th><th>Cycle</th><th>Status</th></tr></thead>
+            <tbody>
+            {% for a in account.applications %}
+              <tr><td>{{ a.reference_number or 'Draft' }}</td><td>{{ a.cycle_name or '—' }}</td><td>{{ a.status }}</td></tr>
+            {% else %}
+              <tr><td colspan="3" class="text-muted">No applications.</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-lg-5">
+      <div class="card border-danger h-100">
+        <div class="card-body">
+          <h5 class="fw-bold text-danger mb-2">PERMANENT DELETION</h5>
+          <p class="small fw-semibold mb-2">This action permanently deletes this student's account, applications, uploaded
+            documents, payment records, visa information, and other associated data. This cannot be undone.</p>
+          <p class="small text-muted mb-2">Scope: permanent deletion removes the student's data from the application's active database and application-managed storage. It does not control copies that may exist in infrastructure backups, snapshots, previously sent emails, or external systems.</p>
+          {% set i = account.impact %}
+          <p class="small mb-1">For this student, that is:</p>
+          <ul class="small mb-3">
+            <li>the login and student profile</li>
+            <li>{{ i.applications }} funding application(s) with all answers, history, matches, referrals, decisions and bank details</li>
+            <li>{{ i.visa_requests }} visa-assistance request(s) with their visa information and history</li>
+            <li>{{ i.mpesa_payments }} M-PESA payment record(s) and {{ i.disbursements }} disbursement record(s)</li>
+            <li>{{ i.stored_files }} stored file(s) (uploaded visa documents, M-PESA screenshots)</li>
+            <li>{{ i.notifications }} notification(s), saved opportunities{% if i.contact_messages or i.scam_reports %}, {{ i.contact_messages }} contact message(s) and {{ i.scam_reports }} scam report(s) sent from this e-mail{% endif %}</li>
+          </ul>
+          {% if i.verified_payments or i.disbursements %}
+          <div class="alert alert-warning small">
+            This account has {{ i.verified_payments }} verified payment(s) and {{ i.disbursements }} disbursement record(s),
+            which will also be permanently deleted. Keep any records you are required to retain elsewhere first.
+          </div>
+          {% endif %}
+          <p class="small text-muted">Deletion is a decision for an administrator based on the platform's rules and applicable
+            law. The system does not decide that a user has broken any rule.</p>
+          <button type="button" class="btn btn-danger fw-semibold" data-bs-toggle="modal" data-bs-target="#deleteModal">
+            Permanently Delete Account…
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <form class="modal-content" method="POST" action="{{ url_for('admin_account_delete', user_id=account.user_id) }}"
+          id="deleteForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold text-danger" id="deleteModalTitle">PERMANENT DELETION</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="mb-2"><strong>{{ account.full_name }}</strong><br><span class="text-muted">{{ account.email }}</span></p>
+        <div class="alert alert-danger small fw-semibold">This action permanently deletes this student's account, applications,
+          uploaded documents, payment records, visa information, and other associated data. This cannot be undone.</div>
+        <p class="small text-muted mb-3">Scope: permanent deletion removes the student's data from the application's active database and application-managed storage. It does not control copies that may exist in infrastructure backups, snapshots, previously sent emails, or external systems.</p>
+        <div class="mb-3">
+          <label for="confirm_email" class="form-label fw-semibold">1. Enter the student's email exactly</label>
+          <input id="confirm_email" name="confirm_email" type="text" class="form-control" required autocomplete="off"
+                 placeholder="{{ account.email }}">
+        </div>
+        <div class="mb-3">
+          <label for="reason" class="form-label fw-semibold">2. Enter a deletion reason <span class="text-danger">*</span></label>
+          <textarea id="reason" name="reason" class="form-control" rows="3" required
+                    minlength="{{ reason_min }}" maxlength="{{ reason_max }}"
+                    placeholder="e.g. Account violates platform rules/law."></textarea>
+          <div class="form-text">Kept in the audit log with your admin account and the time. Don't include the student's
+            personal details here.</div>
+        </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" value="yes" id="confirm_permanent" name="confirm_permanent" required>
+          <label class="form-check-label fw-semibold" for="confirm_permanent">3. I understand this deletion is permanent.</label>
+        </div>
+        <p class="small text-muted mb-0">4. Click <strong>Permanently Delete Account</strong>.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-danger fw-semibold" id="deleteSubmit">Permanently Delete Account</button>
+      </div>
+    </form>
+  </div>
+</div>
+<script>
+  (function () {
+    var form = document.getElementById('deleteForm');
+    // Stop a double-click from sending the request twice (the server also handles it safely).
+    form.addEventListener('submit', function () {
+      var b = document.getElementById('deleteSubmit'); b.disabled = true; b.textContent = 'Permanently deleting…';
+    });
+    {% if open_delete %}
+    document.addEventListener('DOMContentLoaded', function () {
+      if (window.bootstrap) { new bootstrap.Modal(document.getElementById('deleteModal')).show(); }
+    });
+    {% endif %}
+  })();
+</script>
+{% endblock %}

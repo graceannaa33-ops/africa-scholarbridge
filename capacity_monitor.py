@@ -540,10 +540,13 @@ def flush_sample(db, cfg, now=None):
         db.execute("INSERT INTO capacity_samples (host, worker, created_at, data) VALUES (?, ?, ?, ?)",
                    (_host_id(), _worker_id(), now, json.dumps(data)))
         if users:
+            # Only for accounts that still exist: a stale session cookie of a
+            # deleted account must not re-create its activity row.
             db.executemany(
-                "INSERT INTO capacity_active_users (user_key, last_seen) VALUES (?, ?) "
+                "INSERT INTO capacity_active_users (user_key, last_seen) SELECT ?, ? "
+                "WHERE EXISTS (SELECT 1 FROM users WHERE id = CAST(substr(?, instr(?, ':') + 1) AS INTEGER)) "
                 "ON CONFLICT(user_key) DO UPDATE SET last_seen = MAX(last_seen, excluded.last_seen)",
-                list(users.items()))
+                [(k, v, k, k) for k, v in users.items()])
         db.commit()
         data["db_write_ms"] = round((time.perf_counter() - t) * 1000.0, 2)
     except Exception:  # noqa: BLE001

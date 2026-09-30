@@ -16,6 +16,7 @@ import re
 import random
 import sqlite3
 import secrets
+import hmac
 from datetime import datetime, date
 from functools import wraps
 
@@ -32,6 +33,7 @@ import email_lib
 import mpesa_parser
 import visa_verification as visa_verify
 import capacity_monitor
+import account_moderation
 import json
 
 app = Flask(__name__)
@@ -438,6 +440,13 @@ def login_required(f):
     def wrapper(*args, **kwargs):
         if session.get("role") != "student":
             flash("Please log in to continue.", "warning")
+            return redirect(url_for("login"))
+        if current_student() is None:
+            # The account no longer exists (e.g. deleted by an admin): end
+            # this student session cleanly instead of failing on every page.
+            session.pop("user_id", None)
+            session.pop("role", None)
+            flash("Your session has ended. Please log in again.", "warning")
             return redirect(url_for("login"))
         return f(*args, **kwargs)
     return wrapper
@@ -2749,6 +2758,105 @@ def admin_students():
     query += " ORDER BY s.id DESC"
     students = db.execute(query, params).fetchall()
     return render_template("admin/students.html", students=students, search=q or "")
+
+
+# ---------------------------------------------------------------------
+# 👥 USER ACCOUNTS -> ACCOUNT MANAGEMENT (Main Admin only)
+# List / search / inspect student accounts and permanently delete one,
+# with a written reason, typed confirmation, CSRF protection and an audit
+# log. Logic lives in account_moderation.py. Main Admin and Visa Admin
+# accounts are never listed and cannot be deleted here.
+# ---------------------------------------------------------------------
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _csrf_ok():
+    sent = request.form.get("csrf_token") or ""
+    expected = session.get("_csrf_token") or ""
+    return bool(expected) and hmac.compare_digest(sent, expected)
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+def _current_admin_identity():
+    """(admin user id, admin e-mail) of the signed-in Main Admin, or None."""
+    if session.get("role") != "admin":
+        return None
+    row = g.db.execute("SELECT id, email FROM users WHERE id = ? AND role = 'admin'",
+                       (session.get("user_id"),)).fetchone()
+    return (row["id"], row["email"]) if row else None
+
+
+@app.route("/admin/accounts")
+@admin_required
+def admin_accounts():
+    q = request.args.get("q", "")
+    try:
+        page = int(request.args.get("page", 1))
+    except ValueError:
+        page = 1
+    rows, total, page, pages = account_moderation.list_students(g.db, q, page)
+    return render_template("admin/accounts.html", accounts=rows, total=total, page=page, pages=pages,
+                           search=q.strip(), audit=account_moderation.recent_audit(g.db))
+
+
+@app.route("/admin/accounts/<int:user_id>")
+@admin_required
+def admin_account_detail(user_id):
+    account = account_moderation.get_student_account(g.db, user_id)
+    if account is None:
+        flash("That student account does not exist (it may already have been deleted).", "info")
+        return redirect(url_for("admin_accounts"))
+    return render_template("admin/account_detail.html", account=account,
+                           reason_min=account_moderation.REASON_MIN, reason_max=account_moderation.REASON_MAX,
+                           open_delete=request.args.get("delete") == "1")
+
+
+@app.route("/admin/accounts/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def admin_account_delete(user_id):
+    if not _csrf_ok():
+        flash("The request could not be verified (it may have expired). Please try again.", "danger")
+        return redirect(url_for("admin_account_detail", user_id=user_id)), 303
+    admin = _current_admin_identity()
+    if admin is None:
+        abort(403)
+    account = account_moderation.get_student_account(g.db, user_id)
+    if account is None:
+        flash("That account was already deleted.", "info")
+        return redirect(url_for("admin_accounts")), 303
+    reason, errors = account_moderation.validate_request(account, request.form)
+    if errors:
+        for e in errors:
+            flash(e, "danger")
+        return redirect(url_for("admin_account_detail", user_id=user_id, delete=1)), 303
+    upload_dirs = {"visa_documents": VISA_DOCS_DIR, "payment_proofs": PAYMENT_PROOF_DIR}
+    try:
+        outcome, info = account_moderation.delete_student_account(
+            g.db, user_id, admin[0], admin[1], reason, upload_dirs)
+    except Exception:  # noqa: BLE001 - rolled back inside; nothing was deleted
+        app.logger.exception("Account deletion failed for user %s (rolled back).", user_id)
+        flash("The account could not be deleted because of a server error. Nothing was changed.", "danger")
+        return redirect(url_for("admin_account_detail", user_id=user_id)), 303
+    if outcome == "not_found":
+        flash("That account was already deleted.", "info")
+    elif outcome == "refused":
+        flash(info, "danger")
+    else:
+        files = info["files"]
+        flash("The student account and all of its data were permanently deleted "
+              f"({files['removed']} stored file(s) removed).", "success")
+        if files["failed"]:
+            flash(f"Database deletion succeeded, but {files['failed']} stored file(s) could not be removed from "
+                  "storage. This has been recorded in the audit log - please ask whoever manages the server "
+                  "to remove them.", "warning")
+    return redirect(url_for("admin_accounts")), 303
 
 
 @app.route("/admin/cycles", methods=["GET", "POST"])
