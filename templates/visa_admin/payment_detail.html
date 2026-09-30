@@ -44,13 +44,33 @@
         {% else %}
           <p class="small text-muted">No SMS text submitted{{ ' — screenshot only. The transaction code below was TYPED by the student.' if payment.code_source == 'manual' else '.' }}</p>
         {% endif %}
-        <table class="table table-sm small mb-2">
-          <tr><th style="width:40%">Expected amount</th><td>KSh {{ '{:,.0f}'.format(payment.expected_amount or visa_fee) }}</td></tr>
-          <tr><th>Submitted amount</th><td>{{ 'KSh {:,.2f}'.format(payment.submitted_amount) if payment.submitted_amount is not none else '—' }}</td></tr>
-          <tr><th>Transaction code</th><td class="font-monospace">{{ payment.mpesa_transaction_code or payment.transaction_reference or '—' }} {% if payment.code_source %}<span class="badge bg-secondary">{{ 'from SMS' if payment.code_source == 'sms' else 'typed' }}</span>{% endif %}</td></tr>
-          <tr><th>Extracted recipient</th><td>{{ payment.extracted_recipient_name or '—' }}</td></tr>
-          <tr><th>Extracted recipient phone</th><td>{{ payment.extracted_recipient_phone or '—' }}</td></tr>
-          <tr><th>Extracted date / time</th><td>{{ payment.extracted_transaction_date or '—' }} {{ payment.extracted_transaction_time or '' }}</td></tr>
+        {% if student_parsed %}
+          {% if student_parsed.looks_like_mpesa %}
+          <div class="alert alert-success small py-2 mb-2" id="parseStatus">
+            ✓ Standard M-PESA confirmation structure detected. The details below were read automatically —
+            you still need to confirm the money arrived before verifying.
+          </div>
+          {% else %}
+          <div class="alert alert-warning small py-2 mb-2" id="parseStatus">
+            <strong>{{ manual_review_message }}</strong><br>
+            The original message is shown above exactly as the student submitted it.
+          </div>
+          {% endif %}
+        {% endif %}
+        <h6 class="fw-bold small mt-2">Extracted M-PESA details</h6>
+        <table class="table table-sm small mb-2" id="extractedDetails">
+          <tr><th style="width:40%">Transaction code</th><td class="font-monospace">{{ payment.mpesa_transaction_code or payment.transaction_reference or '—' }} {% if payment.code_source %}<span class="badge bg-secondary">{{ 'from SMS' if payment.code_source == 'sms' else 'typed' }}</span>{% endif %}</td></tr>
+          <tr><th>M-PESA status</th><td>{{ student_parsed.status if student_parsed and student_parsed.status else '—' }}</td></tr>
+          <tr><th>Amount</th><td>{{ 'KSh {:,.2f}'.format(payment.submitted_amount) if payment.submitted_amount is not none else '—' }}</td></tr>
+          <tr><th>Expected amount</th><td>KSh {{ '{:,.0f}'.format(payment.expected_amount or visa_fee) }}</td></tr>
+          <tr><th>Sender / student phone</th><td>{{ payment.phone_number or '—' }} <span class="text-muted">(entered by the student)</span></td></tr>
+          <tr><th>Recipient</th><td>{{ student_side.name or '—' }} {{ student_side.phone or '' }}</td></tr>
+          <tr><th>Date</th><td>{{ student_side.date or '—' }}</td></tr>
+          <tr><th>Time</th><td>{{ student_side.time or '—' }}</td></tr>
+          <tr><th>Transaction cost</th><td>{{ 'KSh {:,.2f}'.format(student_parsed.transaction_cost) if student_parsed and student_parsed.transaction_cost is not none else '—' }}</td></tr>
+          <tr><th>New M-PESA balance <span class="text-muted fw-normal">(not the payment)</span></th><td>{{ 'KSh {:,.2f}'.format(student_parsed.balance) if student_parsed and student_parsed.balance is not none else '—' }}</td></tr>
+          <tr><th>Daily transaction limit <span class="text-muted fw-normal">(not the payment)</span></th><td>{{ 'KSh {:,.2f}'.format(student_parsed.daily_limit) if student_parsed and student_parsed.daily_limit is not none else '—' }}</td></tr>
+          <tr><th>Verification status</th><td><span class="badge {{ 'bg-success' if payment.payment_status == 'PAYMENT_VERIFIED' else 'bg-danger' if payment.payment_status == 'PAYMENT_REJECTED' else 'bg-warning text-dark' }}">{{ status_labels.get(payment.payment_status, payment.payment_status) }}</span></td></tr>
         </table>
         {% if flags %}
         <h6 class="fw-bold small mt-3">Automatic checks (aids only)</h6>

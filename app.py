@@ -3637,11 +3637,20 @@ def visa_admin_payment_detail(payment_id):
             flash("Admin notes saved.", "success")
         return redirect(url_for("visa_admin_payment_detail", payment_id=payment_id))
 
+    # Re-read the ORIGINAL message with the current parser for display (the
+    # stored copy is exactly what the student pasted). Aids only - this never
+    # changes the payment status.
+    student_parsed = (mpesa_parser.parse_mpesa_message(payment["submitted_mpesa_message"])
+                      if payment["submitted_mpesa_message"] else None)
+    reparsed = student_parsed or {}
     student_side = {
         "transaction_code": payment["mpesa_transaction_code"] or payment["transaction_reference"],
-        "amount": payment["submitted_amount"], "date": payment["extracted_transaction_date"],
-        "time": payment["extracted_transaction_time"], "name": payment["extracted_recipient_name"],
-        "phone": payment["extracted_recipient_phone"], "payer_phone": payment["phone_number"],
+        "amount": payment["submitted_amount"],
+        "date": payment["extracted_transaction_date"] or reparsed.get("date"),
+        "time": payment["extracted_transaction_time"] or reparsed.get("time"),
+        "name": payment["extracted_recipient_name"] or reparsed.get("counterparty_name"),
+        "phone": payment["extracted_recipient_phone"] or reparsed.get("counterparty_phone"),
+        "payer_phone": payment["phone_number"],
     }
     incoming_side = {
         "transaction_code": payment["admin_transaction_code"], "amount": payment["admin_received_amount"],
@@ -3664,6 +3673,7 @@ def visa_admin_payment_detail(payment_id):
     return render_template(
         "visa_admin/payment_detail.html", payment=payment, flags=_payment_flags(payment),
         student_side=student_side, incoming_side=incoming_side, comparison=comparison,
+        student_parsed=student_parsed, manual_review_message=mpesa_parser.MANUAL_REVIEW_MESSAGE,
         other_submissions=other_submissions, status_labels=PAYMENT_STATUS_LABELS,
         mpesa_receiving_number=_visa_payment_recipient(db), visa_fee=_visa_service_fee(db),
     )
