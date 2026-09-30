@@ -997,6 +997,10 @@ files, not folders. That is the most common way these two folders go missing.)
    `SECRET_KEY=<long random value>` (or "Generate"), `ADMIN_EMAIL=africascholarbridge@gmail.com`,
    `MPESA_PHONE_NUMBER=0181785792`, `VISA_APPLICATION_FEE=1500`, `FLASK_DEBUG=0`,
    `PYTHON_VERSION=3.11.9`.
+   - **Python version:** the repo's `.python-version` file pins Python **3.11** (Render uses the latest 3.11
+     patch). The visa OCR package `rapidocr-onnxruntime==1.4.4` only supports Python below 3.13, so Render's
+     default Python 3.14 cannot install it. A `PYTHON_VERSION` variable overrides the file - if you set one,
+     keep it on 3.11.x (or 3.12.x), never 3.13 or newer. (`runtime.txt` is not read by Render.)
 5. After the first successful deploy, open the service's **Shell** tab and run
    `python create_admin.py` to set the admin password (hidden prompt, never stored in a file).
 6. Log in at `https://<your-app>.onrender.com/admin/login` → **Cycles** → create and open the current
