@@ -112,6 +112,23 @@ def normalize_visa_class(value):
     return f"{m.group(1).upper()}-{m.group(2)}" if m else ""
 
 
+def visa_class_printed(printed_upper, visa_class):
+    """Is this exact class (e.g. F-1) printed on the visa?
+
+    1. As a stand-alone token: "R F1", "F-1", "F1" (OCR may read 1 as I/L).
+    2. Inside the labelled "Visa Type/Class" field when OCR has dropped the
+       spaces, e.g. "VISATYPE/CLASSRF1": directly after "CLASS", optionally
+       after the one-letter visa-type annotation (R = regular). The class
+       letter and the 1 must still be there, so a different class (J1, B1,
+       ...) or a longer token (F12, F1X) never matches.
+    """
+    letter = visa_class[0]
+    cls = rf"{letter}-?[1IL](?![A-Z0-9])"
+    if re.search(rf"(?<![A-Z0-9]){cls}", printed_upper):
+        return True
+    return bool(re.search(rf"CLASS[\s:.]*(?:[A-Z][\s:.]*)?{cls}", printed_upper))
+
+
 def parse_iso_date(value):
     try:
         return datetime.strptime((value or "").strip(), "%Y-%m-%d").date()
@@ -258,15 +275,186 @@ class _OcrLock:
 _OCR_ENV = dict(os.environ, MALLOC_ARENA_MAX="1", OMP_NUM_THREADS="1")
 
 
-def _rss_mb(pid):
+# ---------------------------------------------------------------------
+# Memory watchdog. The limit applies to the reader's WHOLE process tree:
+# on Windows a virtual environment's python.exe is a small launcher that
+# runs the real interpreter (where OCR happens) as a CHILD process, so
+# measuring only the started process would see a few MB and never trip.
+# Any "can't measure" is reported as None and the caller fails closed.
+# ---------------------------------------------------------------------
+def _tree_rss_mb(pid):
+    """Memory in MB of `pid` plus all its descendants, or None if the
+    started process itself can't be measured."""
+    if os.name == "nt":
+        return _tree_rss_mb_windows(pid)
+    if os.path.isdir("/proc"):
+        return _tree_rss_mb_proc(pid)
+    return _tree_rss_mb_ps(pid)
+
+
+def _descendants(pid, parent_of):
+    """All descendants of pid, given {child_pid: parent_pid}."""
+    children = {}
+    for child, parent in parent_of.items():
+        children.setdefault(parent, []).append(child)
+    out, todo = [], list(children.get(pid, []))
+    while todo:
+        c = todo.pop()
+        if c != pid and c not in out:
+            out.append(c)
+            todo.extend(children.get(c, []))
+    return out
+
+
+def _proc_status(pid):
+    """{'ppid': int, 'rss_kb': int|None} from /proc, or None."""
     try:
+        info = {"rss_kb": None}
         with open(f"/proc/{pid}/status") as fh:
             for line in fh:
-                if line.startswith("VmRSS:"):
-                    return int(line.split()[1]) / 1024
+                if line.startswith("PPid:"):
+                    info["ppid"] = int(line.split()[1])
+                elif line.startswith("VmRSS:"):
+                    info["rss_kb"] = int(line.split()[1])
+        return info
     except (OSError, ValueError):
+        return None
+
+
+def _tree_rss_mb_proc(pid):
+    root = _proc_status(pid)
+    if root is None or root["rss_kb"] is None:
+        return None
+    parent_of, rss_of = {}, {}
+    for name in os.listdir("/proc"):
+        if name.isdigit():
+            st = _proc_status(int(name))
+            if st and "ppid" in st:
+                parent_of[int(name)] = st["ppid"]
+                rss_of[int(name)] = st["rss_kb"] or 0
+    total = root["rss_kb"] + sum(rss_of.get(c, 0) for c in _descendants(pid, parent_of))
+    return total / 1024
+
+
+def _tree_rss_mb_ps(pid):
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,rss="], capture_output=True,
+                             text=True, timeout=5).stdout
+        rows = {int(a): (int(b), int(c)) for a, b, c in (ln.split() for ln in out.splitlines() if ln.strip())}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    if pid not in rows:
+        return None
+    parent_of = {p: v[0] for p, v in rows.items()}
+    return (rows[pid][1] + sum(rows[c][1] for c in _descendants(pid, parent_of))) / 1024
+
+
+def _win_api():
+    import ctypes
+    from ctypes import wintypes
+
+    class Counters(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t), ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t), ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t)]
+
+    class Entry(ctypes.Structure):
+        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                    ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k.OpenProcess.restype = wintypes.HANDLE
+    k.CloseHandle.argtypes = [wintypes.HANDLE]
+    k.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+    k.K32GetProcessMemoryInfo.restype = wintypes.BOOL
+    k.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+    k.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    k.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    k.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    k.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+    return ctypes, k, Counters, Entry
+
+
+def _win_parent_map():
+    ctypes, k, _, Entry = _win_api()
+    snap = k.CreateToolhelp32Snapshot(0x2, 0)              # TH32CS_SNAPPROCESS
+    if not snap or snap == ctypes.c_void_p(-1).value:
+        return None
+    try:
+        entry, parents = Entry(), {}
+        entry.dwSize = ctypes.sizeof(Entry)
+        ok = k.Process32FirstW(snap, ctypes.byref(entry))
+        while ok:
+            parents[int(entry.th32ProcessID)] = int(entry.th32ParentProcessID)
+            ok = k.Process32NextW(snap, ctypes.byref(entry))
+        return parents
+    finally:
+        k.CloseHandle(snap)
+
+
+def _win_peak_mb(pid):
+    """PEAK working set of one process in MB (catches spikes between
+    checks), or None."""
+    ctypes, k, Counters, _ = _win_api()
+    handle = k.OpenProcess(0x1000 | 0x0010, False, pid)    # QUERY_LIMITED_INFORMATION | VM_READ
+    if not handle:
+        return None
+    try:
+        c = Counters()
+        c.cb = ctypes.sizeof(Counters)
+        if not k.K32GetProcessMemoryInfo(handle, ctypes.byref(c), c.cb):
+            return None
+        return max(c.PeakWorkingSetSize, c.WorkingSetSize) / (1024 * 1024)
+    finally:
+        k.CloseHandle(handle)
+
+
+def _tree_rss_mb_windows(pid):
+    try:
+        root = _win_peak_mb(pid)
+        parents = _win_parent_map()
+        if root is None or parents is None:
+            return None
+        return root + sum(_win_peak_mb(c) or 0.0 for c in _descendants(pid, parents))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _kill_tree(proc):
+    """Stops the reader AND everything it started (e.g. the real interpreter
+    behind a Windows venv launcher), then reaps it."""
+    try:
+        if os.name == "nt":
+            parents = _win_parent_map() or {}
+            ctypes, k, _, _ = _win_api()
+            for c in reversed(_descendants(proc.pid, parents)):
+                h = k.OpenProcess(0x0001, False, c)         # PROCESS_TERMINATE
+                if h:
+                    k.TerminateProcess(h, 1)
+                    k.CloseHandle(h)
+        elif os.path.isdir("/proc"):
+            parent_of = {}
+            for name in os.listdir("/proc"):
+                if name.isdigit():
+                    st = _proc_status(int(name))
+                    if st and "ppid" in st:
+                        parent_of[int(name)] = st["ppid"]
+            import signal
+            for c in reversed(_descendants(proc.pid, parent_of)):
+                try:
+                    os.kill(c, signal.SIGKILL)
+                except OSError:
+                    pass
+    except Exception:  # noqa: BLE001 - still kill the started process below
         pass
-    return 0.0
+    proc.kill()
+    proc.wait()
 
 
 _READ_ERRORS = {
@@ -355,13 +543,30 @@ def _run_reader(file_bytes, ext, tempfile):
                     close_fds=True, env=_OCR_ENV,
                 )
                 started = time.monotonic()
+                measured = False
                 while proc.poll() is None:
+                    rss = _tree_rss_mb(proc.pid)
+                    if rss is None:
+                        # A process that is exiting stops reporting memory just
+                        # before it can be collected: give it a moment to finish.
+                        # It only counts as finished normally if its memory WAS
+                        # measured while it ran.
+                        try:
+                            proc.wait(timeout=1.0)
+                            break
+                        except subprocess.TimeoutExpired:
+                            pass                   # still running and unmeasurable
+                    else:
+                        measured = True
+                    # Over time, over memory, or memory can't be measured
+                    # (limit can't be enforced) -> stop: unreadable (fail closed).
                     if (time.monotonic() - started > OCR_TIMEOUT_SECONDS
-                            or _rss_mb(proc.pid) > OCR_MAX_RSS_MB):
-                        proc.kill()
-                        proc.wait()
+                            or rss is None or rss > OCR_MAX_RSS_MB):
+                        _kill_tree(proc)
                         return None
                     time.sleep(0.05)
+            if not measured:
+                return None                        # the memory limit was never checked
             if proc.returncode != 0:
                 return None
             with open(out, "rb") as fh:
@@ -578,8 +783,7 @@ def verify_visa_submission(form, file_bytes, filename, applicant, today=None):
 
     printed = (text or "").upper()
     if cleaned["visa_type"] in STUDENT_VISA_CLASSES:
-        letter = cleaned["visa_type"][0]
-        if not re.search(rf"(?<![A-Z0-9]){letter}-?[1IL](?![A-Z0-9])", printed):
+        if not visa_class_printed(printed, cleaned["visa_type"]):
             errors.append(f"The visa class {cleaned['visa_type']} could not be read on the visa document.")
     if issue:
         wanted = _foil_date(issue).translate(_TO_DIGIT)

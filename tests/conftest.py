@@ -202,17 +202,18 @@ def _visa_fields(overrides):
     return p, printed, (l1, l2)
 
 
+FIXTURE_FONT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "fonts", "DejaVuSansMono.ttf")
+
+
 def visa_image(blur=0, **overrides):
     """A rendered visa-page picture (PIL Image) - what a student photographs."""
     from PIL import Image, ImageDraw, ImageFilter, ImageFont
     _, printed, (l1, l2) = _visa_fields(overrides)
 
     def font(size):
-        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-                     "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"):
-            if os.path.exists(path):
-                return ImageFont.truetype(path, size)
-        return ImageFont.load_default(size=size)
+        # Always the bundled font, so the sample visa looks the same (and is
+        # read the same by OCR) on Windows, macOS and Linux.
+        return ImageFont.truetype(FIXTURE_FONT, size)
 
     im = Image.new("RGB", (1400, 900), (236, 242, 236))
     d = ImageDraw.Draw(im)

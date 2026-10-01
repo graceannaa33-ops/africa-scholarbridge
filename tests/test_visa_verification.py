@@ -423,3 +423,19 @@ def test_other_routes_keep_the_8mb_request_limit(client, student):
     with app_module.app.test_request_context("/application/visa-document/upload", method="POST"):
         from flask import request
         assert request.max_content_length == 32 * 1024 * 1024
+
+
+@pytest.mark.parametrize("printed,visa_class,expected", [
+    ("VISA TYPE/CLASS R F1", "F-1", True),
+    ("VISATYPE/CLASSRF1", "F-1", True),          # OCR dropped the spaces (proportional fonts, JPEG)
+    ("TYPE/CLASS: RF-1", "F-1", True),
+    ("VISATYPE/CLASSRFI", "F-1", True),          # 1 read as I
+    ("VISATYPE/CLASSRJ1", "F-1", False),         # a different class never matches
+    ("VISATYPE/CLASSRB1", "F-1", False),
+    ("VISATYPE/CLASSRF12", "F-1", False),        # longer token
+    ("VISATYPE/CLASSRRF1", "F-1", False),        # more than one annotation letter
+    ("PASSPORTF1", "F-1", False),                # glued to an unrelated word
+    ("VISATYPE/CLASSRJ1", "J-1", True),
+])
+def test_visa_class_found_in_labelled_field_without_spaces(printed, visa_class, expected):
+    assert vv.visa_class_printed(printed, visa_class) is expected
