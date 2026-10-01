@@ -30,6 +30,11 @@ def get_db():
     conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # Overwrite freed space with zeros on EVERY write, not only during an
+    # account deletion: an UPDATE that moves a row (e.g. a form saved step
+    # by step) otherwise leaves the old copy of the row - personal data -
+    # in the file's free space, where a later deletion can't reach it.
+    conn.execute("PRAGMA secure_delete = ON")
     return conn
 
 

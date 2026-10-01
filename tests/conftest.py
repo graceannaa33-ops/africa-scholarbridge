@@ -320,3 +320,15 @@ def complete_visa_form(client, request_id, sign=True):
     if sign:
         return client.post(f"/student-visa/application/{request_id}/submit",
                            data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
+
+
+
+def pytest_report_header(config):
+    """Say up front whether the visa OCR reader can run here. Without it
+    (e.g. Python 3.13+, where rapidocr-onnxruntime 1.4.4 cannot be
+    installed) visa verification FAILS CLOSED, so the tests that need to
+    read photos/scans fail. Use Python 3.11, as on Render (.python-version)."""
+    import importlib.util
+    ok = importlib.util.find_spec("rapidocr_onnxruntime") is not None
+    return (f"visa OCR reader (rapidocr_onnxruntime): {'available' if ok else 'NOT AVAILABLE'} | "
+            f"Python {sys.version.split()[0]} (project uses 3.11 - see .python-version)")

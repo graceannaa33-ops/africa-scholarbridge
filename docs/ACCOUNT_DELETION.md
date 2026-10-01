@@ -15,7 +15,7 @@ forensic destruction on the physical storage device.
 | Application-level (done by the app) | Infrastructure-level (NOT controlled by the app) |
 |---|---|
 | All of the student's rows are deleted from the active SQLite database in one transaction. | Render disk snapshots/backups taken before the deletion still contain the old database and files until they expire. Check your Render dashboard for retention. |
-| SQLite `secure_delete` is on for the deletion, so SQLite overwrites the freed database pages with zeros instead of leaving the old content in the file's free space. | Filesystem/SSD-level remnants: deleted files are unlinked (not overwritten), and the temporary SQLite rollback journal is removed after commit. The storage device may keep old blocks until they are reused. |
+| SQLite `secure_delete` is on for every database connection, so freed space (from deletions *and* from updates that move a row) is overwritten with zeros. After a deletion the database file is also compacted (`VACUUM`, best effort; skipped and logged if the database is busy), which removes copies left in free space by earlier updates. | Filesystem/SSD-level remnants: deleted files are unlinked (not overwritten), and the temporary SQLite rollback journal is removed after commit. The storage device may keep old blocks until they are reused. |
 | The student's uploaded files are removed from `uploads/visa_documents/`, `uploads/payment_proofs/` and `uploads/visa_application_documents/`. | Emails already sent to the student or to admins (confirmations, notifications, alerts). |
 | | Server/Render logs, copies someone downloaded, external systems (M-PESA, banks, providers). |
 

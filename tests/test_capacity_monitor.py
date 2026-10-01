@@ -309,7 +309,13 @@ def test_high_concurrent_requests(db, cfg):
     assert r["levels"]["concurrent_requests"] == "critical" and "Application/server bottleneck" in out.sent[0][2]
 
 
-def test_high_ocr_queue_from_real_hooks(db, cfg):
+def test_high_ocr_queue_from_real_hooks(db, cfg, monkeypatch):
+    # The sample also records the REAL machine's CPU/memory/disk. Pin those
+    # to normal values so a nearly-full developer disk (storage alert at
+    # 75%+) can't produce a different first alert than the OCR one tested here.
+    real_sample = cm._host.sample
+    monkeypatch.setattr(cm._host, "sample", lambda c: dict(
+        real_sample(c), cpu_percent=20.0, memory_percent=40.0, storage_percent=30.0))
     cm._take_interval()
     for _ in range(7):
         cm.ocr_waiting_started()                                    # 7 uploads waiting for the reader

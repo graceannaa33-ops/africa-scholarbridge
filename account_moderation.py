@@ -17,8 +17,10 @@ Permanent deletion (delete_student_account) removes, in ONE transaction:
   * the student's "recently active" monitoring entry.
 It then VERIFIES nothing linked to the student remains (otherwise it rolls
 back), writes one audit row, and commits. SQLite's secure_delete is on for
-this connection, so SQLite overwrites the freed database pages with zeros
-instead of leaving the old content in the file's free space.
+every connection (database.get_db), so SQLite overwrites freed space with
+zeros instead of leaving old content in the file's free space; after the
+deletion the file is also compacted (VACUUM, best effort) so copies left by
+earlier updates are removed too.
 
 Scope: this is APPLICATION-LEVEL permanent deletion. It removes the
 student's data from the application's active database and
@@ -38,6 +40,7 @@ serialised by BEGIN IMMEDIATE; a repeat click reports "already deleted".
 """
 
 import json
+import logging
 import re
 import os
 from datetime import datetime, timezone
@@ -262,11 +265,6 @@ def delete_student_account(db, user_id, admin_user_id, admin_email, reason, uplo
     except Exception:
         db.rollback()
         raise
-    finally:
-        try:
-            db.execute("PRAGMA secure_delete = OFF")
-        except Exception:  # noqa: BLE001
-            pass
 
     # Files only after the database change is permanent.
     removed = missing = failed = 0
@@ -288,7 +286,26 @@ def delete_student_account(db, user_id, admin_user_id, admin_email, reason, uplo
         db.commit()
     except Exception:  # noqa: BLE001 - the deletion itself already succeeded
         pass
+
+    # Rebuild the database file without its free space, so copies of this
+    # student's rows left there by earlier updates (e.g. written before
+    # secure_delete was on for every connection) are gone too. Best effort:
+    # if another request holds the database, it is skipped and recorded -
+    # the deletion itself has already succeeded.
+    if not _compact(db):
+        logging.getLogger(__name__).warning(
+            "Account deletion for user %s succeeded; database compaction (VACUUM) was skipped "
+            "because the database was busy. It runs again on the next deletion.", user_id)
     return "deleted", details
+
+
+def _compact(db):
+    try:
+        db.commit()
+        db.execute("VACUUM")
+        return True
+    except Exception:  # noqa: BLE001 - e.g. database busy; never fails the deletion
+        return False
 
 
 def _safe_path(base, name):
