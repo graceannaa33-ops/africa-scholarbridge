@@ -22,8 +22,8 @@ def test_wrong_visa_information_fails_and_goes_to_visa_assistance(client, studen
 
     # -> automatically sent into the existing visa assistance / M-PESA flow
     assert r.status_code == 302
-    assert "/student-visa/" in r.headers["Location"] and "payment" in r.headers["Location"]
-    page = client.get(r.headers["Location"]).get_data(as_text=True)
+    assert "/student-visa/application/" in r.headers["Location"]   # visa assistance form first
+    page = client.get(r.headers["Location"], follow_redirects=True).get_data(as_text=True)
     assert "We could not verify your U.S. visa" in page          # failure message shown
     assert "uploaded successfully" not in page.lower()           # no success message
     assert "verified successfully" not in page.lower()
@@ -39,7 +39,7 @@ def test_wrong_visa_information_fails_and_goes_to_visa_assistance(client, studen
     assert len(visa_requests_for(app_row["id"])) == 1            # one assistance request
 
     # no continuing
-    r = client.get("/application/step/preferences")
+    r = client.post("/application/step/visa", data={"action": "continue"})
     assert r.status_code == 302 and r.headers["Location"].endswith("/application/step/visa")
     r = client.post("/application/submit")
     assert r.headers["Location"].endswith("/application/step/visa")

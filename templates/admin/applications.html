@@ -20,8 +20,9 @@
 
   <div class="card asb-card">
     <div class="card-body">
-      <table class="table table-hover">
-        <thead><tr><th>Student</th><th>Country</th><th>Reference</th><th>Status</th><th>Updated</th><th>Confirmation Email</th><th></th></tr></thead>
+      <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead><tr><th>Student</th><th>Country</th><th>Reference</th><th>Status</th><th>Visa Status</th><th>Had Visa</th><th>Payment</th><th>Updated</th><th>Confirmation Email</th><th></th></tr></thead>
         <tbody>
         {% for a in applications %}
           <tr>
@@ -29,6 +30,10 @@
             <td>{{ a.country }}</td>
             <td>{{ a.reference_number or '—' }}</td>
             <td><span class="badge bg-info text-dark">{{ a.status }}</span></td>
+            {% set vs = visa_summaries[a.id] %}
+            <td class="small">{{ vs.visa_status }}</td>
+            <td class="small">{{ vs.had_visa }}</td>
+            <td class="small">{{ vs.payment_status }}{% if vs.payment_amount and vs.payment_status != 'Not required' %}<br><span class="text-muted">{{ vs.payment_amount }}{% if vs.payment_reference %} · {{ vs.payment_reference }}{% endif %}{% if vs.payment_date %} · {{ vs.payment_date }}{% endif %}</span>{% endif %}</td>
             <td class="small text-muted">{{ a.last_updated }}</td>
             <td>
               {% if a.status == 'Submitted' or a.reference_number %}
@@ -46,10 +51,11 @@
             <td><a href="{{ url_for('admin_application_detail', application_id=a.id) }}" class="btn btn-sm btn-outline-primary">Review</a></td>
           </tr>
         {% else %}
-          <tr><td colspan="7" class="text-muted text-center">No applications found.</td></tr>
+          <tr><td colspan="10" class="text-muted text-center">No applications found.</td></tr>
         {% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 </div>

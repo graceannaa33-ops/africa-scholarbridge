@@ -43,6 +43,7 @@ that is a business decision for the platform operator, not something the
 code can guarantee.
 """
 
+import os
 import random
 from datetime import datetime, timedelta
 
@@ -93,31 +94,192 @@ VISA_PIPELINE_STAGES = [
     ("completed", "Completed"),
 ]
 
+# The visa assistance application form: 12 sections, in order. The last
+# one (declaration) submits the form. The same form is used for every
+# visa assistance request; only WHEN payment happens differs (see
+# form_is_first below).
 VISA_APPLICATION_STEPS = [
-    "personal", "education", "visa_info", "financial", "documents", "assistance", "review",
+    "personal", "contact", "passport", "visa_info", "education", "financial",
+    "accommodation", "travel_history", "legal", "documents", "additional", "declaration",
 ]
 
 VISA_STEP_TITLES = {
-    "personal": "Personal Information",
-    "education": "Education",
+    "personal": "Applicant Personal Information",
+    "contact": "Contact Information",
+    "passport": "Passport Information",
     "visa_info": "Visa Information",
+    "education": "Education / Employment Information",
     "financial": "Financial Information",
-    "documents": "Documents",
-    "assistance": "Assistance Required",
-    "review": "Final Review",
+    "accommodation": "Accommodation Information",
+    "travel_history": "Travel History",
+    "legal": "Immigration / Legal Questions",
+    "documents": "Documents Checklist",
+    "additional": "Additional Information",
+    "declaration": "Applicant Declaration",
 }
 
+# Which visa_requests columns each section saves (plain text fields).
+# Multi-select fields are handled separately (MULTI_FIELDS).
+VISA_STEP_FIELDS = {
+    "personal": ["full_name", "date_of_birth", "gender", "citizenship", "country_of_residence",
+                 "national_id_number", "marital_status"],
+    "contact": ["email", "phone", "alt_phone", "current_address", "city", "contact_country"],
+    "passport": ["passport_status", "passport_number", "passport_type", "passport_issue_date",
+                 "passport_expiry_date", "passport_place_of_issue", "passport_issuing_country"],
+    "visa_info": ["destination_country", "visa_category", "purpose_of_travel", "intended_arrival_date",
+                  "intended_departure_date", "expected_length_of_stay",
+                  # optional U.S. study details (kept from the original form)
+                  "us_institution", "program", "degree", "intended_start_date", "admission_status",
+                  "i20_status", "ds160_status", "sevis_info", "interview_status", "application_type",
+                  "previous_us_visa"],
+    "education": ["current_status", "education_level", "organization_name", "position_course",
+                  "organization_address", "organization_contact"],
+    "financial": ["trip_payer", "travel_budget"],
+    "accommodation": ["accommodation_type", "accommodation_name", "accommodation_address",
+                      "accommodation_contact"],
+    "travel_history": ["travelled_before", "countries_visited", "previous_application",
+                       "previous_application_date", "previous_visa_approved", "previous_refusal_explanation"],
+    "legal": ["overstayed", "overstayed_explanation", "refused_entry", "refused_entry_explanation",
+              "visa_refused", "visa_refused_explanation"],
+    "documents": [],
+    "additional": ["additional_information"],
+    "declaration": [],
+}
+MULTI_FIELDS = {"financial": ["funding_sources"], "additional": ["assistance_required"]}
+
+# Sections that must be filled before the declaration can be submitted.
+VISA_REQUIRED_FIELDS = {
+    "personal": ["full_name", "date_of_birth", "gender", "citizenship", "country_of_residence"],
+    "contact": ["email", "phone"],
+    "passport": ["passport_status"],
+    "visa_info": ["destination_country", "visa_category", "purpose_of_travel"],
+    "education": ["current_status"],
+    "financial": ["trip_payer"],
+    "accommodation": ["accommodation_type"],
+    "travel_history": ["travelled_before", "previous_application"],
+    "legal": ["overstayed", "refused_entry", "visa_refused"],
+}
+
+GENDERS = ["Male", "Female", "Other"]
+MARITAL_STATUSES = ["Single", "Married", "Divorced", "Widowed"]
+PASSPORT_STATUSES = ["I have a valid passport", "I do not currently have a passport"]
+PASSPORT_TYPES = ["Ordinary", "Diplomatic", "Official / Service", "Other"]
+VISA_TYPES = ["Student Visa", "Tourist Visa", "Work Visa", "Business Visa", "Family/Visitor Visa",
+              "Medical Visa", "Transit Visa", "Other"]
+DEFAULT_DESTINATION = "United States of America"
+DEFAULT_VISA_TYPE = "Student Visa"
+CURRENT_STATUSES = ["Student", "Employed", "Self-Employed / Business Owner", "Unemployed", "Other"]
+TRIP_PAYERS = ["Myself", "Parent/Guardian", "Sponsor", "Employer", "School/University", "Other"]
+FUND_SOURCES = ["Employment Income", "Business Income", "Savings", "Scholarship", "Family Support",
+                "Sponsorship", "Other"]
+ACCOMMODATION_TYPES = ["Hotel", "University Accommodation", "With Family/Friend", "Rented Accommodation", "Other"]
+YES_NO = ["Yes", "No"]
+ASSISTANCE_OPTIONS = ["DS-160 Guidance", "Document Preparation", "Application Review", "Appointment Guidance",
+                      "Interview Preparation", "General Guidance", "Full Assistance"]
+
+# Supporting documents for the visa assistance application. Uploading is
+# optional per item ("if applicable"); the identity rule below decides
+# what MUST be present before the declaration can be submitted.
 VISA_DOCUMENT_CHECKLIST = [
-    ("Valid Passport", True),
-    ("DS-160 Confirmation Page", True),
-    ("Visa Appointment Confirmation", False),
-    ("Admission Letter", True),
-    ("I-20 / School Documentation", True),
-    ("SEVIS Fee Receipt (I-901)", False),
-    ("Academic Records / Transcripts", True),
-    ("Financial Evidence", False),
+    ("Valid Passport", False),
+    ("Passport-size Photograph", True),
+    ("National ID", False),
+    ("Bank Statement / Proof of Funds", False),
+    ("Flight Itinerary / Travel Reservation", False),
+    ("Accommodation Booking", False),
+    ("Travel Medical Insurance", False),
+    ("Employment/Business/Student Proof", False),
+    ("Invitation Letter", False),
+    ("Sponsorship Letter", False),
+    ("Admission Letter", False),
     ("Other Supporting Documents", False),
 ]
+
+
+def form_is_first(visa_request):
+    """True for requests raised from the final step of the annual funding
+    application: the form, documents and declaration come BEFORE payment."""
+    return bool(visa_request) and bool(visa_request["form_first"])
+
+
+def form_submitted(visa_request):
+    return bool(visa_request) and bool(visa_request["form_submitted_at"])
+
+
+def missing_required_fields(visa_request):
+    """[(step, field), ...] still empty before the declaration is allowed."""
+    missing = []
+    for step, fields in VISA_REQUIRED_FIELDS.items():
+        for f in fields:
+            if not (visa_request[f] or "").strip():
+                missing.append((step, f))
+    return missing
+
+
+# Which supporting documents MUST be uploaded before the declaration.
+# This is a configurable policy, not something the specification fixed:
+#   VISA_REQUIRED_DOCUMENTS=photo,identity   (default)
+#       photo    -> Passport-size Photograph
+#       identity -> a Valid Passport copy, or a National ID when the
+#                   applicant says they do not currently have a passport
+#   VISA_REQUIRED_DOCUMENTS=photo   /   =identity   -> only that one
+#   VISA_REQUIRED_DOCUMENTS=none                   -> every document optional
+# Unknown words are ignored. Read on every check, so a change takes effect
+# on the next request after the environment is updated (Render: restart).
+DEFAULT_REQUIRED_DOCUMENTS = "photo,identity"
+
+
+def required_document_rules():
+    raw = os.environ.get("VISA_REQUIRED_DOCUMENTS", DEFAULT_REQUIRED_DOCUMENTS)
+    words = {w.strip().lower() for w in raw.replace(";", ",").split(",") if w.strip()}
+    if "none" in words:
+        return set()
+    return words & {"photo", "identity"}
+
+
+def required_document_types(visa_request):
+    """The document types this applicant must upload, per the policy above."""
+    rules = required_document_rules()
+    needed = []
+    if "photo" in rules:
+        needed.append("Passport-size Photograph")
+    if "identity" in rules:
+        has_passport = (visa_request["passport_status"] or "") == "I have a valid passport"
+        needed.append("Valid Passport" if has_passport else "National ID")
+    return needed
+
+
+def missing_required_documents(visa_request, documents):
+    """Required document types (see required_document_types) not uploaded yet."""
+    uploaded = {d["document_type"] for d in documents if d["stored_file"]}
+    return [n for n in required_document_types(visa_request) if n not in uploaded]
+
+
+VISA_DISPLAY_STATUSES = ["Not Required Yet", "Visa Already Provided", "Visa Assistance Required",
+                         "Visa Form Submitted", "Awaiting Payment", "Paid", "Under Review", "Completed"]
+_REVIEW_STAGES = {"preparation", "application_review", "fee_coverage_processing", "interview_preparation",
+                  "document_review", "final_guidance", "information_required"}
+
+
+def visa_display_status(application, visa_request=None, latest_payment=None):
+    """One plain label for admins, from the application + visa request."""
+    if application is None:
+        return "Not Required Yet"
+    if application["visa_status"] == "HAS_VISA":
+        return "Visa Already Provided" if application["visa_step_status"] == "COMPLETE" else "Not Required Yet"
+    if application["visa_status"] != "NEEDS_ASSISTANCE" or visa_request is None:
+        return "Not Required Yet"
+    if visa_request["application_status"] == "completed":
+        return "Completed"
+    if visa_request["application_status"] in _REVIEW_STAGES:
+        return "Under Review"
+    if is_unlocked(visa_request):
+        return "Paid"
+    if form_is_first(visa_request) and not form_submitted(visa_request):
+        return "Visa Assistance Required"
+    if latest_payment is not None and latest_payment["payment_status"] == "PAYMENT_PENDING":
+        return "Awaiting Payment"          # proof submitted, waiting for admin confirmation
+    return "Visa Form Submitted" if form_is_first(visa_request) else "Visa Assistance Required"
 
 
 def get_pricing_for_country(db, country):
@@ -347,3 +509,35 @@ def format_usd(amount):
     if float(amount).is_integer():
         return f"US${int(amount)}"
     return f"US${amount:,.2f}"
+
+
+# Labels for showing a submitted form (Visa Admin only - this includes
+# passport/ID and financial details).
+VISA_FIELD_LABELS = {
+    "full_name": "Full Name", "date_of_birth": "Date of Birth", "gender": "Gender", "citizenship": "Nationality",
+    "country_of_residence": "Country of Residence", "national_id_number": "National ID Number",
+    "marital_status": "Marital Status", "email": "Email Address", "phone": "Phone Number",
+    "alt_phone": "Alternative Phone Number", "current_address": "Current Address", "city": "City/Town",
+    "contact_country": "Country", "passport_status": "Passport", "passport_number": "Passport Number",
+    "passport_type": "Passport Type", "passport_issue_date": "Date of Issue", "passport_expiry_date": "Date of Expiry",
+    "passport_place_of_issue": "Place of Issue", "passport_issuing_country": "Issuing Country",
+    "destination_country": "Country to Visit", "visa_category": "Visa Type", "purpose_of_travel": "Purpose of Travel",
+    "intended_arrival_date": "Intended Arrival", "intended_departure_date": "Intended Departure",
+    "expected_length_of_stay": "Expected Length of Stay", "us_institution": "U.S. Institution", "program": "Program",
+    "degree": "Degree", "intended_start_date": "Intended Start Date", "admission_status": "Admission Status",
+    "i20_status": "I-20 Status", "ds160_status": "DS-160 Status", "sevis_info": "SEVIS Information",
+    "interview_status": "Interview Status", "application_type": "Application Type",
+    "previous_us_visa": "Previous U.S. Visa", "current_status": "Current Status", "education_level": "Education Level",
+    "organization_name": "School/University/Employer/Business", "position_course": "Position/Course",
+    "organization_address": "Address", "organization_contact": "Phone/Email", "trip_payer": "Who will pay",
+    "travel_budget": "Estimated Travel Budget", "funding_sources": "Source of Funds",
+    "accommodation_type": "Where will you stay", "accommodation_name": "Hotel/Host/Accommodation",
+    "accommodation_address": "Address", "accommodation_contact": "Phone/Email",
+    "travelled_before": "Travelled outside country before", "countries_visited": "Countries Visited",
+    "previous_application": "Previously applied to destination", "previous_application_date": "Date of Previous Application",
+    "previous_visa_approved": "Was the visa approved", "previous_refusal_explanation": "Refusal explanation",
+    "overstayed": "Overstayed / violated immigration rules", "overstayed_explanation": "Explanation",
+    "refused_entry": "Refused entry to another country", "refused_entry_explanation": "Explanation",
+    "visa_refused": "Visa application refused before", "visa_refused_explanation": "Explanation",
+    "additional_information": "Additional Information", "assistance_required": "Assistance Requested",
+}

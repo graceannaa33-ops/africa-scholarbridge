@@ -28,6 +28,25 @@
         </div>
       </div>
 
+      <div class="card asb-card mb-4" id="visaSummary">
+        <div class="card-body">
+          <h5 class="fw-bold">🇺🇸 Visa &amp; Payment Summary</h5>
+          <table class="table table-sm mb-2">
+            <tr><th style="width:45%">Visa Status</th><td>{{ visa_summary.visa_status }}</td></tr>
+            <tr><th>Already had a visa</th><td>{{ visa_summary.had_visa }}</td></tr>
+            <tr><th>Visa Application</th><td>{{ visa_summary.visa_application }}</td></tr>
+            <tr><th>Payment Status</th><td>{{ visa_summary.payment_status }}</td></tr>
+            <tr><th>Payment Amount</th><td>{{ visa_summary.payment_amount or '—' }}</td></tr>
+            <tr><th>Payment Reference</th><td class="font-monospace">{{ visa_summary.payment_reference or '—' }}</td></tr>
+            <tr><th>Payment Date</th><td>{{ visa_summary.payment_date or '—' }}</td></tr>
+            <tr><th>Visa Review</th><td>{{ visa_summary.visa_review }}</td></tr>
+            <tr><th>Overall Application Status</th><td>{{ application.status }}</td></tr>
+          </table>
+          <p class="small text-muted mb-0">Visa documents, passport/ID details, the full visa application form and M-PESA
+            payment proofs are handled only in the separate Visa Admin portal.</p>
+        </div>
+      </div>
+
       <div class="card asb-card mb-4">
         <div class="card-body">
           <h5 class="fw-bold">Update Status</h5>

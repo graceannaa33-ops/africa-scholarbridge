@@ -1082,6 +1082,56 @@ def _init_db():
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_log_created ON admin_audit_log(created_at)")
 
+    # ---------------------------------------------------------------
+    # VISA ASSISTANCE APPLICATION FORM (12 sections). The visa
+    # application IS the existing visa_requests row - these columns
+    # extend it rather than adding a parallel table. Columns that already
+    # existed (full_name, date_of_birth, gender, citizenship = nationality,
+    # country_of_residence, email, phone, passport_status, visa_category
+    # = visa type, education_level, the U.S. study details,
+    # funding_sources = source of funds, previous_refusal,
+    # assistance_required) are reused as they are.
+    #
+    # form_first = 1: request raised from the FINAL step of the annual
+    # funding application -> form, documents and declaration come BEFORE
+    # payment. 0 (default, and every older request): the original
+    # pay-first order of the standalone /student-visa service.
+    # ---------------------------------------------------------------
+    existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(visa_requests)").fetchall()}
+    for col, definition in {
+        "national_id_number": "TEXT", "marital_status": "TEXT",
+        "alt_phone": "TEXT", "current_address": "TEXT", "city": "TEXT", "contact_country": "TEXT",
+        "passport_number": "TEXT", "passport_type": "TEXT", "passport_issue_date": "TEXT",
+        "passport_expiry_date": "TEXT", "passport_place_of_issue": "TEXT", "passport_issuing_country": "TEXT",
+        "destination_country": "TEXT", "purpose_of_travel": "TEXT", "intended_arrival_date": "TEXT",
+        "intended_departure_date": "TEXT", "expected_length_of_stay": "TEXT",
+        "current_status": "TEXT", "organization_name": "TEXT", "position_course": "TEXT",
+        "organization_address": "TEXT", "organization_contact": "TEXT",
+        "trip_payer": "TEXT", "travel_budget": "TEXT",
+        "accommodation_type": "TEXT", "accommodation_name": "TEXT", "accommodation_address": "TEXT",
+        "accommodation_contact": "TEXT",
+        "travelled_before": "TEXT", "countries_visited": "TEXT", "previous_application": "TEXT",
+        "previous_application_date": "TEXT", "previous_visa_approved": "TEXT",
+        "previous_refusal_explanation": "TEXT",
+        "overstayed": "TEXT", "overstayed_explanation": "TEXT", "refused_entry": "TEXT",
+        "refused_entry_explanation": "TEXT", "visa_refused": "TEXT", "visa_refused_explanation": "TEXT",
+        "additional_information": "TEXT",
+        "declaration_name": "TEXT", "declaration_confirmed": "INTEGER NOT NULL DEFAULT 0",
+        "declaration_date": "TEXT", "form_submitted_at": "TEXT",
+        "form_first": "INTEGER NOT NULL DEFAULT 0",
+    }.items():
+        if col not in existing_cols:
+            _add_column(cur, "visa_requests", col, definition)
+
+    # Real, securely stored supporting documents. stored_file is a random
+    # server-side name inside UPLOAD_ROOT/visa_application_documents/ (never
+    # the student's filename, never a public URL). Rows without stored_file
+    # are the older checklist placeholders and keep working as before.
+    existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(visa_documents)").fetchall()}
+    for col, definition in {"stored_file": "TEXT", "original_name": "TEXT", "file_size": "INTEGER"}.items():
+        if col not in existing_cols:
+            _add_column(cur, "visa_documents", col, definition)
+
     ensure_reference_data(cur)
 
     conn.commit()

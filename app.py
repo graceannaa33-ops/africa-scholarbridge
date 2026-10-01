@@ -31,6 +31,7 @@ import visa as visa_lib
 import banks_lib
 import email_lib
 import mpesa_parser
+from werkzeug.utils import secure_filename
 import visa_verification as visa_verify
 import capacity_monitor
 import account_moderation
@@ -228,10 +229,23 @@ def _send_to_visa_assistance(db, student, application, cycle):
     db.commit()
     session.pop(VISA_FAILED_SESSION_KEY, None)
     visa_request_id = get_or_create_integrated_visa_request(db, student, application, cycle)
-    db.commit()
     if not visa_request_id:
+        db.commit()
         flash("Visa assistance pricing is not yet configured for your country. Please contact support.", "danger")
         return redirect(url_for("application_step", step_name="visa"))
+    # Requests from the funding application follow the order
+    # visa form -> documents -> declaration -> payment. An older request of
+    # this application that has no payment yet is moved onto that order
+    # too; one already paid / with a payment submitted keeps its order.
+    db.execute(
+        """UPDATE visa_requests SET form_first = 1, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND form_first = 0 AND payment_verified = 0
+             AND NOT EXISTS (SELECT 1 FROM visa_payments WHERE request_id = visa_requests.id)""",
+        (visa_request_id,))
+    db.commit()
+    vr = db.execute("SELECT * FROM visa_requests WHERE id = ?", (visa_request_id,)).fetchone()
+    if visa_lib.form_is_first(vr) and not visa_lib.form_submitted(vr):
+        return redirect(url_for("student_visa_application", request_id=visa_request_id))
     return redirect(url_for("student_visa_payment", request_id=visa_request_id))
 
 
@@ -654,6 +668,10 @@ def _visa_post_unlock_redirect(visa_request):
       still goes to the full multi-step visa application as before.
     """
     if visa_request["annual_application_id"]:
+        app_row = g.db.execute("SELECT id, status FROM funding_applications WHERE id = ?",
+                               (visa_request["annual_application_id"],)).fetchone()
+        if app_row and app_row["status"] != "Draft":
+            return redirect(url_for("application_confirmation", application_id=app_row["id"]))
         return redirect(url_for("application_step", step_name="visa"))
     return redirect(url_for("student_visa_application", request_id=visa_request["id"]))
 
@@ -678,14 +696,28 @@ def get_or_create_integrated_visa_request(db, student, application, cycle):
 
     ref = visa_lib.generate_visa_request_number(db, datetime.utcnow().year)
     user = db.execute("SELECT email FROM users WHERE id = ?", (student["user_id"],)).fetchone()
+    # The configured visa assistance fee (Visa Admin -> Settings), exactly
+    # like the standalone service - one fee, one payment system.
+    pricing = dict(pricing)
+    pricing.update(service_price=_visa_service_fee(db), currency="KES", currency_symbol="KSh")
+    # Pre-fill the visa form from the funding application the student has
+    # just completed, so nothing has to be typed twice.
     cur = db.execute(
         """INSERT INTO visa_requests
            (request_number, student_id, annual_application_id, cycle_id, country, currency, currency_symbol,
-            service_price, full_name, email, phone, citizenship, country_of_residence)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            service_price, full_name, email, phone, citizenship, country_of_residence, date_of_birth, gender,
+            education_level, current_status, organization_name, position_course,
+            destination_country, visa_category, form_first)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Student', ?, ?, ?, ?, 1)""",
         (ref, student["id"], application["id"], cycle["id"], pricing["country"], pricing["currency"],
-         pricing["currency_symbol"], pricing["service_price"], student["full_name"],
-         user["email"] if user else None, student["phone"], student["citizenship"], student["country"]),
+         pricing["currency_symbol"], pricing["service_price"],
+         application["full_name"] or student["full_name"],
+         application["email"] or (user["email"] if user else None),
+         application["phone"] or student["phone"], application["citizenship"] or student["citizenship"],
+         application["country"] or student["country"], application["date_of_birth"],
+         application["gender"] if application["gender"] in visa_lib.GENDERS else None,
+         application["education_level"], application["institution"], application["course"],
+         visa_lib.DEFAULT_DESTINATION, visa_lib.DEFAULT_VISA_TYPE),
     )
     request_id = cur.lastrowid
     visa_lib.add_visa_history(db, request_id, "payment_required",
@@ -704,7 +736,7 @@ def get_or_create_integrated_visa_request(db, student, application, cycle):
     )
     add_notification(db, student["id"],
                       f"🇺🇸 Visa assistance request {ref} created as part of your annual application. "
-                      f"Complete payment to continue.")
+                      f"Complete the visa application form to continue.")
     return request_id
 
 
@@ -774,6 +806,24 @@ def _verify_visa_payment(db, visa_request, method, provider_reference=None,
         (request_id, f"🔔 New Visa Assistance Case\nStudent: {student['full_name'] if student else '—'}\n"
                      f"Reference: {visa_request['request_number']}\nPayment verified ({method})."),
     )
+
+    # Form-first (from the final step of the funding application): the
+    # form, documents and declaration are already in, so payment is the
+    # last step - visa processing starts now and the annual funding
+    # application is submitted (reference number, confirmation email,
+    # matching) exactly as the student's own final submit would do.
+    if visa_lib.form_is_first(visa_request) and visa_lib.form_submitted(visa_request):
+        visa_lib.start_processing_timeline(db, request_id, processing_days=14)
+        add_notification(db, visa_request["student_id"],
+                         "✅ Payment verified successfully. Your visa assistance application is now under review.")
+        app_row = (db.execute("SELECT * FROM funding_applications WHERE id = ?",
+                              (visa_request["annual_application_id"],)).fetchone()
+                   if visa_request["annual_application_id"] else None)
+        if app_row and app_row["status"] == "Draft" and _review_done(app_row):
+            db.execute("UPDATE funding_applications SET visa_assistance_status = 'COMPLETE' WHERE id = ?",
+                       (app_row["id"],))
+            _submit_funding_application(db, app_row["id"], visa_request["student_id"])
+        return
     add_notification(db, visa_request["student_id"],
                      "✅ Payment verified successfully. You can now continue with your visa application.")
 
@@ -1262,18 +1312,37 @@ def dashboard():
 
 
 APPLICATION_STEPS = [
-    # 🇺🇸 The visa question is a STEP INSIDE the annual funding application,
-    # right after the core personal/education/funding information - not a
-    # separate destination the student has to go find. See the "visa"
-    # branch inside application_step() below.
+    # 🇺🇸 Visa Verification is the VERY LAST step of the annual funding
+    # application: the student is only asked about their visa after every
+    # other step, including Review, is done. See the "visa" branch inside
+    # application_step() below and _review_done().
     #
-    # 🏦 The "bank" step (right before final review) is the Funding Payment
+    # 🏦 The "bank" step (right before review) is the Funding Payment
     # Information step - see the "bank" branch inside application_step().
     # It is skipped automatically (bank_step_status = 'NOT_REQUIRED') for
     # any student whose matching opportunities don't require bank details.
-    "personal", "education", "funding_need", "financial", "visa", "preferences",
-    "statement", "documents", "bank", "review",
+    "personal", "education", "funding_need", "financial", "preferences",
+    "statement", "documents", "bank", "review", "visa",
 ]
+APPLICATION_STEP_TITLES = {
+    "personal": "Personal Information", "education": "Education", "funding_need": "Funding Need",
+    "financial": "Financial Information", "preferences": "Preferences", "statement": "Personal Statement",
+    "documents": "Documents", "bank": "Payment Information", "review": "Review",
+    "visa": "Visa Verification",
+}
+VISA_STEP_NOT_READY_MESSAGE = ("Please complete and review all of your application steps first. "
+                               "Visa Verification is the final step.")
+
+
+def _review_done(application):
+    """True once the student has submitted the Review step (current_step
+    then points at the final Visa Verification step or beyond)."""
+    return (application["current_step"] or 0) >= len(APPLICATION_STEPS)
+
+
+def _first_unfinished_step(application):
+    idx = max(0, min((application["current_step"] or 1) - 1, APPLICATION_STEPS.index("review")))
+    return APPLICATION_STEPS[idx]
 
 
 @app.route("/application/start")
@@ -1324,12 +1393,15 @@ def application_step(step_name):
     # verified - they must be verified now.
     application = _revoke_unverified_visa_step(db, application)
 
-    # No later step (URL typing, back/forward, refresh, crafted POSTs) is
-    # reachable until the visa requirement has actually PASSED: a visa
-    # verified automatically, or visa assistance with verified payment.
-    if step_index > APPLICATION_STEPS.index("visa") and not _visa_requirement_passed(application):
-        flash(VISA_STEP_REQUIRED_MESSAGE, "warning")
-        return redirect(url_for("application_step", step_name="visa"))
+    # Visa Verification is the final step: it is not shown (URL typing,
+    # crafted POSTs) until the student has completed and reviewed every
+    # earlier step. A visa path already under way (older applications that
+    # answered the question when it was earlier in the flow) stays
+    # reachable so the student can always see and finish it.
+    if (step_name == "visa" and not _review_done(application)
+            and application["visa_step_status"] == "NOT_STARTED"):
+        flash(VISA_STEP_NOT_READY_MESSAGE, "warning")
+        return redirect(url_for("application_step", step_name=_first_unfinished_step(application)))
 
     # ---------------------------------------------------------------
     # 🇺🇸 VISA STEP - handled separately from the generic "save fields,
@@ -1346,7 +1418,11 @@ def application_step(step_name):
             if not _visa_requirement_passed(application):
                 flash(VISA_STEP_REQUIRED_MESSAGE, "warning")
                 return redirect(url_for("application_step", step_name="visa"))
-            return redirect(url_for("application_step", step_name=APPLICATION_STEPS[step_index + 1]))
+            if not _review_done(application):
+                flash(VISA_STEP_NOT_READY_MESSAGE, "warning")
+                return redirect(url_for("application_step", step_name=_first_unfinished_step(application)))
+            # Visa is the last step: what follows is the final submission.
+            return redirect(url_for("application_submit"))
 
         if request.method == "POST":
             choice = request.form.get("visa_choice")
@@ -1396,7 +1472,7 @@ def application_step(step_name):
             ).fetchone()
         return render_template(
             "application_visa_step.html", application=application, step_index=step_index,
-            steps=APPLICATION_STEPS, linked_visa_request=linked_visa_request,
+            steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES, linked_visa_request=linked_visa_request,
             us_gov_fee=visa_lib.US_GOV_VISA_FEE_USD, student_fee=visa_lib.STUDENT_SERVICE_FEE_USD,
             format_price=visa_lib.format_price,
             allowed_visa_doc_extensions=sorted(ALLOWED_VISA_DOC_EXTENSIONS),
@@ -1574,7 +1650,7 @@ def application_step(step_name):
         ).fetchone()
         masked_account = banks_lib.mask_account_number(existing_details["account_number"]) if existing_details else None
         return render_template(
-            "application_bank_step.html", application=application, step_index=step_index, steps=APPLICATION_STEPS,
+            "application_bank_step.html", application=application, step_index=step_index, steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES,
             existing_details=existing_details, masked_account=masked_account,
             countries=banks_lib.country_names(), account_types=banks_lib.ACCOUNT_TYPES,
         )
@@ -1605,7 +1681,17 @@ def application_step(step_name):
         elif step_name == "documents":
             pass  # documents step just shows the checklist, nothing to save here
         elif step_name == "review":
-            pass  # review step is confirm-only, handled in application_submit
+            # Review leads to the FINAL step (Visa Verification), so make
+            # sure the earlier steps that must be filled actually are.
+            missing = [label for f, label in (("full_name", "full name"), ("email", "email"),
+                                               ("country", "country"))
+                       if not (application[f] or "").strip()]
+            if missing:
+                flash("Please complete your " + ", ".join(missing) + " before continuing.", "warning")
+                return redirect(url_for("application_step", step_name="personal"))
+            if application["bank_step_status"] not in ("COMPLETE", "NOT_REQUIRED"):
+                flash("Please complete the Payment Information step before continuing.", "warning")
+                return redirect(url_for("application_step", step_name="bank"))
 
         if updates:
             set_clause = ", ".join([f"{k} = ?" for k in updates])
@@ -1619,8 +1705,6 @@ def application_step(step_name):
                    (next_step + 1, application["id"]))
         db.commit()
 
-        if step_name == "review":
-            return redirect(url_for("application_submit"))
         return redirect(url_for("application_step", step_name=APPLICATION_STEPS[step_index + 1]))
 
     # Refresh application after any earlier commits
@@ -1629,7 +1713,7 @@ def application_step(step_name):
 
     return render_template(
         "application.html", application=application, step_name=step_name, step_index=step_index,
-        steps=APPLICATION_STEPS, documents=documents,
+        steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES, documents=documents,
     )
 
 
@@ -1701,7 +1785,7 @@ def application_visa_document_upload():
     add_notification(db, student["id"], "✅ Your U.S. visa information was verified successfully.")
     db.commit()
     session.pop(VISA_FAILED_SESSION_KEY, None)
-    flash("✅ Visa information verified successfully.", "success")
+    flash("✅ Visa uploaded successfully. Visa information verified successfully.", "success")
     return redirect(url_for("application_step", step_name="visa"))
 
 
@@ -1783,6 +1867,56 @@ def application_bank_details_remove():
     return redirect(url_for("dashboard"))
 
 
+def _submit_funding_application(db, application_id, student_id):
+    """Submits a Draft annual funding application: reference number,
+    confirmation email, matching. Used by the student's own final submit
+    and, on the visa assistance path, automatically once the visa
+    assistance payment has been verified. Returns (reference, email_ok)
+    or (None, None) when the application is not a Draft any more."""
+    application = db.execute("SELECT * FROM funding_applications WHERE id = ?", (application_id,)).fetchone()
+    if not application or application["status"] != "Draft":
+        return None, None
+    cycle = db.execute("SELECT * FROM funding_cycles WHERE id = ?", (application["cycle_id"],)).fetchone()
+    ref = generate_reference_number(db, cycle["year"].split("/")[0])
+    cur = db.execute(
+        """UPDATE funding_applications
+           SET status = 'Submitted', reference_number = ?, submitted_at = CURRENT_TIMESTAMP,
+               last_updated = CURRENT_TIMESTAMP
+           WHERE id = ? AND status = 'Draft'""",
+        (ref, application_id),
+    )
+    if cur.rowcount != 1:
+        return None, None
+    add_history(db, application_id, "Submitted", "Application submitted by student.")
+    add_notification(db, student_id, f"🎓 Your application {ref} has been received.")
+    db.commit()
+
+    # 📧 The application is now genuinely saved as Submitted with a
+    # real reference number - only NOW do we send the confirmation
+    # email. An email failure never reverses the submission; it only
+    # ever changes confirmation_email_status.
+    email_sent_ok = send_application_confirmation_email(db, application_id)
+
+    # Move straight to eligibility review + matching.
+    db.execute("UPDATE funding_applications SET status = 'Funding Matching' WHERE id = ?", (application_id,))
+    add_history(db, application_id, "Funding Matching", "Automatically queued for matching.")
+    add_notification(db, student_id, "🔎 Your application is currently being matched with funding opportunities.")
+    db.commit()
+
+    run_matching_for_application(db, application_id)
+
+    match_count = db.execute(
+        "SELECT COUNT(*) c FROM funding_matches WHERE application_id = ?", (application_id,)
+    ).fetchone()["c"]
+    new_status = "Matched" if match_count > 0 else "No Suitable Match"
+    db.execute("UPDATE funding_applications SET status = ? WHERE id = ?", (new_status, application_id))
+    add_history(db, application_id, new_status)
+    if match_count > 0:
+        add_notification(db, student_id, f"🎯 You have received {match_count} new funding match(es).")
+    db.commit()
+    return ref, email_sent_ok
+
+
 @app.route("/application/submit", methods=["GET", "POST"])
 @login_required
 def application_submit():
@@ -1796,53 +1930,19 @@ def application_submit():
     if not application or application["status"] != "Draft":
         return redirect(url_for("dashboard"))
 
-    # Same rule as the later application steps: no submitting until the
-    # visa requirement has actually passed (verified visa or verified
-    # visa-assistance payment).
+    # Every step - Visa Verification last - must be done first.
     application = _revoke_unverified_visa_step(db, application)
+    if not _review_done(application):
+        flash(VISA_STEP_NOT_READY_MESSAGE, "warning")
+        return redirect(url_for("application_step", step_name=_first_unfinished_step(application)))
     if not _visa_requirement_passed(application):
         flash(VISA_STEP_REQUIRED_MESSAGE, "warning")
         return redirect(url_for("application_step", step_name="visa"))
 
     if request.method == "POST":
-        ref = generate_reference_number(db, cycle["year"].split("/")[0])
-        db.execute(
-            """UPDATE funding_applications
-               SET status = 'Submitted', reference_number = ?, submitted_at = CURRENT_TIMESTAMP,
-                   last_updated = CURRENT_TIMESTAMP
-               WHERE id = ?""",
-            (ref, application["id"]),
-        )
-        add_history(db, application["id"], "Submitted", "Application submitted by student.")
-        add_notification(db, student["id"], f"🎓 Your application {ref} has been received.")
-        db.commit()
-
-        # 📧 The application is now genuinely saved as Submitted with a
-        # real reference number - only NOW do we send the confirmation
-        # email, never merely because the student clicked the button.
-        # An email failure here never reverses or reverts the submission
-        # above; it only ever changes confirmation_email_status.
-        email_sent_ok = send_application_confirmation_email(db, application["id"])
-
-        # Move straight to eligibility review + matching, so the demo
-        # flow shows the full pipeline working end to end.
-        db.execute("UPDATE funding_applications SET status = 'Funding Matching' WHERE id = ?", (application["id"],))
-        add_history(db, application["id"], "Funding Matching", "Automatically queued for matching.")
-        add_notification(db, student["id"], "🔎 Your application is currently being matched with funding opportunities.")
-        db.commit()
-
-        run_matching_for_application(db, application["id"])
-
-        match_count = db.execute(
-            "SELECT COUNT(*) c FROM funding_matches WHERE application_id = ?", (application["id"],)
-        ).fetchone()["c"]
-        new_status = "Matched" if match_count > 0 else "No Suitable Match"
-        db.execute("UPDATE funding_applications SET status = ? WHERE id = ?", (new_status, application["id"]))
-        add_history(db, application["id"], new_status)
-        if match_count > 0:
-            add_notification(db, student["id"], f"🎯 You have received {match_count} new funding match(es).")
-        db.commit()
-
+        ref, email_sent_ok = _submit_funding_application(db, application["id"], student["id"])
+        if ref is None:
+            return redirect(url_for("dashboard"))
         if email_sent_ok:
             flash(f"Your application was submitted successfully! Reference: {ref}", "success")
         else:
@@ -1889,7 +1989,12 @@ def application_confirmation(application_id):
     if not application:
         return render_template("errors/404.html"), 404
     cycle = db.execute("SELECT * FROM funding_cycles WHERE id = ?", (application["cycle_id"],)).fetchone()
-    return render_template("application_confirmation.html", application=application, cycle=cycle)
+    visa_request = None
+    if application["visa_request_id"]:
+        visa_request = db.execute("SELECT * FROM visa_requests WHERE id = ? AND student_id = ?",
+                                  (application["visa_request_id"], student["id"])).fetchone()
+    return render_template("application_confirmation.html", application=application, cycle=cycle,
+                           visa_request=visa_request, format_price=visa_lib.format_price)
 
 
 @app.route("/matches")
@@ -2152,6 +2257,11 @@ def student_visa_payment(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
+    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
+        flash("Please complete the visa application form, documents and declaration before payment.", "warning")
+        return redirect(url_for("student_visa_application", request_id=request_id))
+    if visa_lib.is_unlocked(visa_request) and visa_request["annual_application_id"]:
+        return _visa_post_unlock_redirect(visa_request)
     payment = _latest_visa_payment(db, request_id)
     return render_template(
         "student_visa/payment.html", visa_request=visa_request, payment=payment,
@@ -2176,6 +2286,8 @@ def student_visa_payment_parse(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         abort(404)
+    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
+        abort(409)
     text = (request.form.get("mpesa_message") or "")[: mpesa_parser.MAX_MESSAGE_LENGTH * 2]
     parsed = mpesa_parser.parse_mpesa_message(text)
     flags = mpesa_parser.validate_student_message(
@@ -2193,6 +2305,9 @@ def student_visa_payment_submit(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
+    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
+        flash("Please complete the visa application form, documents and declaration before payment.", "warning")
+        return redirect(url_for("student_visa_application", request_id=request_id))
     back = redirect(url_for("student_visa_payment", request_id=request_id))
 
     latest = _latest_visa_payment(db, request_id)
@@ -2358,6 +2473,109 @@ Africa ScholarBridge
 
 
 
+# ---------------------------------------------------------------------
+# 🇺🇸 VISA ASSISTANCE APPLICATION FORM (12 sections, visa_lib).
+#
+# Two orders, ONE form:
+#   * form_first requests (raised from the final step of the annual funding
+#     application): form -> documents -> declaration -> payment.
+#   * every other request (standalone /student-visa): the original
+#     pay-first order - the form unlocks after verified payment.
+# ---------------------------------------------------------------------
+VISA_APP_DOCS_DIR = os.path.join(UPLOAD_ROOT, "visa_application_documents")
+os.makedirs(VISA_APP_DOCS_DIR, exist_ok=True)
+ALLOWED_SUPPORT_DOC_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
+MAX_SUPPORT_DOC_SIZE_BYTES = MAX_VISA_DOC_SIZE_BYTES          # 8 MB per file
+_SUPPORT_DOC_SIGNATURES = {"pdf": (b"%PDF-",), "jpg": (b"\xff\xd8\xff",), "jpeg": (b"\xff\xd8\xff",),
+                           "png": (b"\x89PNG\r\n\x1a\n",)}
+_SUPPORT_DOC_MIMETYPES = {"pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png"}
+_DATE_FIELDS = {"date_of_birth", "passport_issue_date", "passport_expiry_date", "intended_arrival_date",
+                "intended_departure_date", "previous_application_date", "intended_start_date"}
+_CHOICE_FIELDS = {
+    "gender": visa_lib.GENDERS, "marital_status": visa_lib.MARITAL_STATUSES,
+    "passport_status": visa_lib.PASSPORT_STATUSES, "passport_type": visa_lib.PASSPORT_TYPES,
+    "visa_category": visa_lib.VISA_TYPES, "current_status": visa_lib.CURRENT_STATUSES,
+    "trip_payer": visa_lib.TRIP_PAYERS, "accommodation_type": visa_lib.ACCOMMODATION_TYPES,
+    "travelled_before": visa_lib.YES_NO, "previous_application": visa_lib.YES_NO,
+    "previous_visa_approved": visa_lib.YES_NO, "overstayed": visa_lib.YES_NO,
+    "refused_entry": visa_lib.YES_NO, "visa_refused": visa_lib.YES_NO,
+}
+_MULTI_CHOICES = {"funding_sources": visa_lib.FUND_SOURCES, "assistance_required": visa_lib.ASSISTANCE_OPTIONS}
+# "Yes" answers that need their follow-up field filled in.
+_FOLLOW_UPS = [
+    ("travelled_before", "countries_visited", "Please list the countries you have visited."),
+    ("overstayed", "overstayed_explanation", "Please explain the overstay / immigration violation."),
+    ("refused_entry", "refused_entry_explanation", "Please explain the refused entry."),
+    ("visa_refused", "visa_refused_explanation", "Please explain the visa refusal."),
+]
+# Follow-up fields cleared when the answer is "No".
+_CLEAR_ON_NO = {
+    "travelled_before": ["countries_visited"],
+    "previous_application": ["previous_application_date", "previous_visa_approved", "previous_refusal_explanation"],
+    "overstayed": ["overstayed_explanation"], "refused_entry": ["refused_entry_explanation"],
+    "visa_refused": ["visa_refused_explanation"],
+}
+
+
+def _clean_form_value(field, raw):
+    value = " ".join((raw or "").split()) if field not in (
+        "additional_information", "current_address", "purpose_of_travel", "organization_address",
+        "accommodation_address", "previous_refusal_explanation", "overstayed_explanation",
+        "refused_entry_explanation", "visa_refused_explanation", "countries_visited") else (raw or "").strip()
+    value = value[:2000]
+    if not value:
+        return None
+    if field in _DATE_FIELDS:
+        try:
+            return datetime.strptime(value, "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            return None
+    if field in _CHOICE_FIELDS and value not in _CHOICE_FIELDS[field]:
+        return None
+    return value
+
+
+def _visa_form_editable(visa_request):
+    """Can the student fill in / change the visa application form now?"""
+    if visa_lib.form_is_first(visa_request):
+        if not visa_lib.is_unlocked(visa_request):
+            return not visa_lib.form_submitted(visa_request)
+        return visa_request["application_status"] == "information_required"
+    return (visa_lib.can_continue_application(visa_request)
+            and visa_request["application_status"] in ("application_unlocked", "information_required"))
+
+
+def _visa_form_redirect(visa_request):
+    """Where to send a student who can't edit the form right now."""
+    if visa_lib.form_is_first(visa_request):
+        if visa_lib.form_submitted(visa_request) and not visa_lib.is_unlocked(visa_request):
+            return redirect(url_for("student_visa_payment", request_id=visa_request["id"]))
+        if visa_lib.is_unlocked(visa_request):
+            return _visa_post_unlock_redirect(visa_request)
+    if not visa_lib.can_continue_application(visa_request):
+        flash("Your visa application unlocks once your payment has been verified by Africa ScholarBridge.", "warning")
+        return redirect(url_for("student_visa_payment", request_id=visa_request["id"]))
+    flash("This visa application is no longer editable. Check your dashboard for its status.", "info")
+    return redirect(url_for("student_visa_dashboard"))
+
+
+def _ensure_visa_checklist(db, request_id):
+    """Adds any checklist item this request doesn't have yet (older
+    requests keep their original rows too)."""
+    have = {r["document_type"] for r in db.execute(
+        "SELECT document_type FROM visa_documents WHERE request_id = ?", (request_id,))}
+    for doc_type, required in visa_lib.VISA_DOCUMENT_CHECKLIST:
+        if doc_type not in have:
+            db.execute("INSERT INTO visa_documents (request_id, document_type, is_required) VALUES (?, ?, ?)",
+                       (request_id, doc_type, 1 if required else 0))
+
+
+def _checklist_documents(db, request_id):
+    order = {t: i for i, (t, _) in enumerate(visa_lib.VISA_DOCUMENT_CHECKLIST)}
+    rows = db.execute("SELECT * FROM visa_documents WHERE request_id = ?", (request_id,)).fetchall()
+    return sorted((r for r in rows if r["document_type"] in order), key=lambda r: order[r["document_type"]])
+
+
 @app.route("/student-visa/application/<int:request_id>")
 @login_required
 def student_visa_application(request_id):
@@ -2366,17 +2584,12 @@ def student_visa_application(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
-
-    # SERVER-SIDE GATE: locked until an admin has VERIFIED the payment.
-    # Submitting an SMS/screenshot alone never gets past this line.
-    if not visa_lib.can_continue_application(visa_request):
-        flash("Your visa application unlocks once your payment has been verified by Africa ScholarBridge.", "warning")
-        return redirect(url_for("student_visa_payment", request_id=request_id))
-
-    if visa_request["application_status"] not in ("application_unlocked", "information_required"):
-        return redirect(url_for("student_visa_dashboard"))
-
-    step_index = max(0, min(visa_request["current_step"] - 1, len(visa_lib.VISA_APPLICATION_STEPS) - 1))
+    # SERVER-SIDE GATE (pay-first requests stay locked until an admin has
+    # VERIFIED the payment; form-first requests are editable until the
+    # declaration is submitted).
+    if not _visa_form_editable(visa_request):
+        return _visa_form_redirect(visa_request)
+    step_index = max(0, min((visa_request["current_step"] or 1) - 1, len(visa_lib.VISA_APPLICATION_STEPS) - 1))
     return redirect(url_for("student_visa_step", request_id=request_id,
                              step_name=visa_lib.VISA_APPLICATION_STEPS[step_index]))
 
@@ -2389,94 +2602,246 @@ def student_visa_step(request_id, step_name):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
-
-    # SERVER-SIDE GATE: locked until an admin has VERIFIED the payment.
-    if not visa_lib.can_continue_application(visa_request):
-        flash("Your visa application unlocks once your payment has been verified by Africa ScholarBridge.", "warning")
-        return redirect(url_for("student_visa_payment", request_id=request_id))
-
-    if visa_request["application_status"] not in ("application_unlocked", "information_required"):
-        flash("This visa application is no longer editable. Check your dashboard for its status.", "info")
-        return redirect(url_for("student_visa_dashboard"))
-
+    if not _visa_form_editable(visa_request):
+        return _visa_form_redirect(visa_request)
     if step_name not in visa_lib.VISA_APPLICATION_STEPS:
         return render_template("errors/404.html"), 404
     step_index = visa_lib.VISA_APPLICATION_STEPS.index(step_name)
 
-    if request.method == "POST":
+    if request.method == "POST" and step_name != "declaration":
         form = request.form
-        updates = {}
-        if step_name == "personal":
-            for f in ["full_name", "date_of_birth", "gender", "email", "phone",
-                      "country_of_residence", "citizenship", "passport_status"]:
-                updates[f] = form.get(f)
-        elif step_name == "education":
-            for f in ["education_level", "us_institution", "program", "degree",
-                      "intended_start_date", "admission_status", "i20_status"]:
-                updates[f] = form.get(f)
-        elif step_name == "visa_info":
-            for f in ["visa_category", "application_type", "previous_us_visa", "previous_refusal",
-                      "ds160_status", "sevis_info", "interview_status"]:
-                updates[f] = form.get(f)
-        elif step_name == "financial":
-            updates["funding_sources"] = ", ".join(form.getlist("funding_sources"))
-        elif step_name == "documents":
-            pass  # documents are managed on /student-visa/documents
-        elif step_name == "assistance":
-            updates["assistance_required"] = ", ".join(form.getlist("assistance_required"))
-        elif step_name == "review":
-            pass  # confirm-only, handled by student_visa_submit
-
+        updates = {f: _clean_form_value(f, form.get(f)) for f in visa_lib.VISA_STEP_FIELDS[step_name]}
+        for f in visa_lib.MULTI_FIELDS.get(step_name, []):
+            picked = [v for v in form.getlist(f) if v in _MULTI_CHOICES[f]]
+            updates[f] = ", ".join(picked) or None
+        for answer, follow_ups in _CLEAR_ON_NO.items():
+            if answer in updates and updates[answer] != "Yes":
+                for f in follow_ups:
+                    updates[f] = None
+        if step_name == "passport" and updates.get("passport_status") == "I do not currently have a passport":
+            for f in ("passport_number", "passport_type", "passport_issue_date", "passport_expiry_date",
+                      "passport_place_of_issue", "passport_issuing_country"):
+                updates[f] = None
+        problems = [msg for answer, follow_up, msg in _FOLLOW_UPS
+                    if answer in updates and updates[answer] == "Yes" and not updates.get(follow_up)]
         if updates:
-            set_clause = ", ".join([f"{k} = ?" for k in updates])
-            db.execute(
-                f"UPDATE visa_requests SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (*updates.values(), request_id),
-            )
-
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            db.execute(f"UPDATE visa_requests SET {set_clause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                       (*updates.values(), request_id))
+        if problems:
+            db.commit()
+            for msg in problems:
+                flash(msg, "warning")
+            return redirect(url_for("student_visa_step", request_id=request_id, step_name=step_name))
         next_step = min(step_index + 1, len(visa_lib.VISA_APPLICATION_STEPS) - 1)
-        db.execute("UPDATE visa_requests SET current_step = ? WHERE id = ?", (next_step + 1, request_id))
+        db.execute("UPDATE visa_requests SET current_step = MAX(COALESCE(current_step, 1), ?) WHERE id = ?",
+                   (next_step + 1, request_id))
         db.commit()
-
-        if step_name == "review":
-            return redirect(url_for("student_visa_submit", request_id=request_id))
         return redirect(url_for("student_visa_step", request_id=request_id,
-                                 step_name=visa_lib.VISA_APPLICATION_STEPS[step_index + 1]))
+                                 step_name=visa_lib.VISA_APPLICATION_STEPS[next_step]))
 
+    if step_name == "documents":
+        _ensure_visa_checklist(db, request_id)
+        db.commit()
     visa_request = db.execute("SELECT * FROM visa_requests WHERE id = ?", (request_id,)).fetchone()
-    documents = db.execute("SELECT * FROM visa_documents WHERE request_id = ?", (request_id,)).fetchall()
+    documents = _checklist_documents(db, request_id)
     return render_template(
         "student_visa/application.html", visa_request=visa_request, step_name=step_name,
-        step_index=step_index, steps=visa_lib.VISA_APPLICATION_STEPS,
-        step_titles=visa_lib.VISA_STEP_TITLES, documents=documents,
+        step_index=step_index, steps=visa_lib.VISA_APPLICATION_STEPS, step_titles=visa_lib.VISA_STEP_TITLES,
+        documents=documents, v=visa_lib, form_first=visa_lib.form_is_first(visa_request),
+        missing_fields=visa_lib.missing_required_fields(visa_request),
+        missing_documents=visa_lib.missing_required_documents(visa_request, documents),
+        required_documents=visa_lib.required_document_types(visa_request),
+        allowed_doc_extensions=sorted(ALLOWED_SUPPORT_DOC_EXTENSIONS),
+        max_doc_mb=MAX_SUPPORT_DOC_SIZE_BYTES // (1024 * 1024),
+        today=datetime.utcnow().date().isoformat(), format_price=visa_lib.format_price,
     )
 
 
-@app.route("/student-visa/application/<int:request_id>/submit", methods=["GET", "POST"])
+@app.route("/student-visa/application/<int:request_id>/documents/upload", methods=["POST"])
 @login_required
-def student_visa_submit(request_id):
+def student_visa_document_upload(request_id):
+    """Secure upload of one supporting document. Type is checked by
+    extension AND file signature, size is limited, the stored name is
+    random (the student's filename is never used on disk) and the file is
+    only reachable through the authenticated view routes below."""
     db = g.db
     student = current_student()
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
+    if not _visa_form_editable(visa_request):
+        return _visa_form_redirect(visa_request)
+    back = redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
 
-    # SERVER-SIDE GATE once more, at the final and most important step.
-    if not visa_lib.is_unlocked(visa_request):
-        flash("Your payment must be approved by an admin before you can submit your visa application.", "warning")
+    doc_type = request.form.get("document_type") or ""
+    if doc_type not in {t for t, _ in visa_lib.VISA_DOCUMENT_CHECKLIST}:
+        flash("Please choose which document you are uploading.", "warning")
+        return back
+    uploaded = request.files.get("document")
+    if not uploaded or not uploaded.filename:
+        flash("Please choose a file to upload.", "warning")
+        return back
+    original = secure_filename(uploaded.filename)[:200] or "document"
+    ext = _visa_doc_extension(uploaded.filename or "")
+    if ext not in ALLOWED_SUPPORT_DOC_EXTENSIONS:
+        flash("Only PDF, JPG, JPEG and PNG files can be uploaded.", "danger")
+        return back
+    data = uploaded.stream.read(MAX_SUPPORT_DOC_SIZE_BYTES + 1)
+    if len(data) > MAX_SUPPORT_DOC_SIZE_BYTES:
+        flash(f"That file is too large. The maximum size is {MAX_SUPPORT_DOC_SIZE_BYTES // (1024 * 1024)} MB.", "danger")
+        return back
+    if not data:
+        flash("That file is empty.", "danger")
+        return back
+    if not data.startswith(_SUPPORT_DOC_SIGNATURES[ext]):
+        flash("That file does not look like a real PDF, JPG or PNG file. Please upload the original document.",
+              "danger")
+        return back
+
+    _ensure_visa_checklist(db, request_id)
+    row = db.execute("SELECT * FROM visa_documents WHERE request_id = ? AND document_type = ? ORDER BY id LIMIT 1",
+                     (request_id, doc_type)).fetchone()
+    stored = f"{secrets.token_hex(16)}.{ext}"
+    with open(os.path.join(VISA_APP_DOCS_DIR, stored), "wb") as fh:
+        fh.write(data)
+    try:
+        db.execute(
+            """UPDATE visa_documents SET stored_file = ?, original_name = ?, file_size = ?, status = 'Uploaded',
+                      uploaded_at = CURRENT_TIMESTAMP, file_path = NULL WHERE id = ?""",
+            (stored, original, len(data), row["id"]))
+        db.commit()
+    except Exception:
+        db.rollback()
+        _remove_support_doc_file(stored)
+        raise
+    if row["stored_file"]:
+        _remove_support_doc_file(row["stored_file"])        # replaced
+    flash(f"{doc_type} uploaded.", "success")
+    return back
+
+
+def _remove_support_doc_file(name):
+    path = os.path.realpath(os.path.join(VISA_APP_DOCS_DIR, name or ""))
+    if name and os.path.dirname(path) == os.path.realpath(VISA_APP_DOCS_DIR):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+@app.route("/student-visa/application/<int:request_id>/documents/<int:document_id>/remove", methods=["POST"])
+@login_required
+def student_visa_document_remove(request_id, document_id):
+    db = g.db
+    student = current_student()
+    visa_request = get_visa_request_or_404(db, request_id, student)
+    if not visa_request:
+        return render_template("errors/404.html"), 404
+    if not _visa_form_editable(visa_request):
+        return _visa_form_redirect(visa_request)
+    row = db.execute("SELECT * FROM visa_documents WHERE id = ? AND request_id = ?",
+                     (document_id, request_id)).fetchone()
+    if row and row["stored_file"]:
+        db.execute("""UPDATE visa_documents SET stored_file = NULL, original_name = NULL, file_size = NULL,
+                      status = 'Missing', uploaded_at = NULL WHERE id = ?""", (document_id,))
+        db.commit()
+        _remove_support_doc_file(row["stored_file"])
+        flash(f"{row['document_type']} removed.", "info")
+    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+
+
+def _send_support_document(row):
+    if not row or not row["stored_file"]:
+        abort(404)
+    ext = _visa_doc_extension(row["stored_file"])
+    response = send_from_directory(VISA_APP_DOCS_DIR, row["stored_file"], as_attachment=False,
+                                   mimetype=_SUPPORT_DOC_MIMETYPES.get(ext, "application/octet-stream"))
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
+    return response
+
+
+@app.route("/student-visa/documents/file/<int:document_id>")
+@login_required
+def student_visa_document_file(document_id):
+    """The student's OWN supporting document only (ownership checked)."""
+    student = current_student()
+    row = g.db.execute(
+        """SELECT d.* FROM visa_documents d JOIN visa_requests v ON v.id = d.request_id
+           WHERE d.id = ? AND v.student_id = ?""", (document_id, student["id"])).fetchone()
+    return _send_support_document(row)
+
+
+@app.route("/student-visa/application/<int:request_id>/submit", methods=["GET", "POST"])
+@login_required
+def student_visa_submit(request_id):
+    """Applicant Declaration -> submits the visa application form.
+    form-first: then payment. Pay-first (already paid): processing starts."""
+    db = g.db
+    student = current_student()
+    visa_request = get_visa_request_or_404(db, request_id, student)
+    if not visa_request:
+        return render_template("errors/404.html"), 404
+    if not _visa_form_editable(visa_request):
+        return _visa_form_redirect(visa_request)
+    if request.method == "GET":
+        return redirect(url_for("student_visa_step", request_id=request_id, step_name="declaration"))
+
+    declaration_step = redirect(url_for("student_visa_step", request_id=request_id, step_name="declaration"))
+    missing = visa_lib.missing_required_fields(visa_request)
+    if missing:
+        first_step = missing[0][0]
+        flash(f"Please complete the \"{visa_lib.VISA_STEP_TITLES[first_step]}\" section before submitting.", "warning")
+        return redirect(url_for("student_visa_step", request_id=request_id, step_name=first_step))
+    for answer, follow_up, msg in _FOLLOW_UPS:
+        if visa_request[answer] == "Yes" and not visa_request[follow_up]:
+            flash(msg, "warning")
+            return redirect(url_for("student_visa_step", request_id=request_id,
+                                     step_name="travel_history" if answer == "travelled_before" else "legal"))
+    _ensure_visa_checklist(db, request_id)
+    missing_docs = visa_lib.missing_required_documents(visa_request, _checklist_documents(db, request_id))
+    if missing_docs:
+        db.commit()
+        flash("Please upload: " + ", ".join(missing_docs) + ".", "warning")
+        return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+
+    typed_name = " ".join((request.form.get("declaration_name") or "").split())
+    if request.form.get("declaration_confirmed") != "yes":
+        flash("Please tick the declaration to confirm the information is true and accurate.", "warning")
+        return declaration_step
+    if not typed_name or typed_name.lower() != " ".join((visa_request["full_name"] or "").split()).lower():
+        flash("Please type your full name exactly as entered in section 1 to sign the declaration.", "warning")
+        return declaration_step
+
+    today = datetime.utcnow().date().isoformat()
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    db.execute(
+        """UPDATE visa_requests SET declaration_name = ?, declaration_confirmed = 1, declaration_date = ?,
+                  form_submitted_at = COALESCE(form_submitted_at, ?), updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?""", (typed_name[:200], today, now, request_id))
+
+    if visa_lib.form_is_first(visa_request) and not visa_lib.is_unlocked(visa_request):
+        visa_lib.add_visa_history(db, request_id, "form_submitted",
+                                  "Visa application form, documents and declaration submitted. Awaiting payment.")
+        add_notification(db, student["id"],
+                         f"🇺🇸 Your visa application form {visa_request['request_number']} was submitted. "
+                         f"Final step: the visa assistance service fee.")
+        db.commit()
+        flash("✅ Visa application form submitted. Final step: pay the visa assistance service fee.", "success")
         return redirect(url_for("student_visa_payment", request_id=request_id))
 
-    if request.method == "POST":
-        visa_lib.start_processing_timeline(db, request_id, processing_days=14)
-        visa_lib.add_visa_history(db, request_id, "preparation", "Application submitted by student.")
-        add_notification(db, student["id"],
-                          f"🇺🇸 Your visa assistance application {visa_request['request_number']} has been submitted. "
-                          f"Processing begins now (up to 2 weeks).")
-        db.commit()
-        flash("Your visa assistance application was submitted! Track its progress on your Visa Dashboard.", "success")
-        return redirect(url_for("student_visa_dashboard"))
-
-    return render_template("student_visa/review.html", visa_request=visa_request)
+    # Payment already verified (pay-first order, or more information
+    # requested by the Visa Admin): processing starts / resumes now.
+    visa_lib.start_processing_timeline(db, request_id, processing_days=14)
+    visa_lib.add_visa_history(db, request_id, "preparation", "Application submitted by student.")
+    add_notification(db, student["id"],
+                     f"🇺🇸 Your visa assistance application {visa_request['request_number']} has been submitted. "
+                     f"Processing begins now (up to 2 weeks).")
+    db.commit()
+    flash("Your visa assistance application was submitted! Track its progress on your Visa Dashboard.", "success")
+    return redirect(url_for("student_visa_dashboard"))
 
 
 @app.route("/student-visa/dashboard")
@@ -2616,6 +2981,53 @@ def admin_capacity_test_alert():
     return redirect(url_for("admin_capacity"))
 
 
+def _main_admin_visa_summary(db, application):
+    """NON-SENSITIVE visa/payment summary for the Main Admin (statuses,
+    amount, payment reference and date only). Passport/ID numbers, the
+    visa form, documents and M-PESA proofs/messages stay in the Visa
+    Admin portal - nothing here links to them."""
+    vr = None
+    if application["visa_request_id"]:
+        vr = db.execute("SELECT * FROM visa_requests WHERE id = ?", (application["visa_request_id"],)).fetchone()
+    latest = _latest_visa_payment(db, vr["id"]) if vr else None
+    if application["visa_status"] == "HAS_VISA":
+        had_visa = "Yes"
+    elif application["visa_status"] == "NEEDS_ASSISTANCE":
+        had_visa = "No"
+    else:
+        had_visa = "Not answered yet"
+    payment_status, amount, reference, paid_date = "Not required", None, None, None
+    if vr is not None:
+        if visa_lib.is_unlocked(vr):
+            payment_status = "Paid"
+        elif latest is not None:
+            payment_status = PAYMENT_STATUS_LABELS.get(latest["payment_status"], latest["payment_status"])
+        else:
+            payment_status = "Not paid yet"
+        amount = f"{vr['currency_symbol'] or 'KSh'} {(vr['service_price'] or 0):,.0f}"
+        verified = db.execute(
+            "SELECT * FROM visa_payments WHERE request_id = ? AND payment_status = 'PAYMENT_VERIFIED' "
+            "ORDER BY id DESC LIMIT 1", (vr["id"],)).fetchone()
+        shown = verified or latest
+        if shown is not None:
+            reference = shown["mpesa_transaction_code"] or shown["transaction_reference"]
+            when = shown["verified_at"] or shown["submitted_at"] or shown["created_at"]
+            try:
+                paid_date = datetime.fromisoformat(str(when)[:19]).strftime("%d/%m/%Y")
+            except ValueError:
+                paid_date = str(when)[:10]
+    visa_status = visa_lib.visa_display_status(application, vr, latest)
+    return {
+        "visa_status": visa_status, "had_visa": had_visa,
+        "visa_application": ("Submitted" if vr is not None and visa_lib.form_submitted(vr)
+                             else "Not submitted" if vr is not None else "—"),
+        "visa_review": visa_status if visa_status in ("Under Review", "Completed") else "—",
+        "payment_status": payment_status, "payment_amount": amount,
+        "payment_reference": reference, "payment_date": paid_date,
+        "visa_reference": vr["request_number"] if vr is not None else None,
+    }
+
+
 @app.route("/admin/applications")
 @admin_required
 def admin_applications():
@@ -2633,8 +3045,9 @@ def admin_applications():
         params += [f"%{q}%", f"%{q}%"]
     query += " ORDER BY a.id DESC"
     apps = db.execute(query, params).fetchall()
+    visa_summaries = {a["id"]: _main_admin_visa_summary(db, a) for a in apps}
     return render_template("admin/applications.html", applications=apps, statuses=APPLICATION_STATUSES,
-                            selected_status=status, search=q or "")
+                            selected_status=status, search=q or "", visa_summaries=visa_summaries)
 
 
 @app.route("/admin/applications/<int:application_id>", methods=["GET", "POST"])
@@ -2678,7 +3091,8 @@ def admin_application_detail(application_id):
 
     return render_template("admin/application_detail.html", application=application, matches=matches_rows,
                             documents=documents, history=history, statuses=APPLICATION_STATUSES,
-                            opportunities=opportunities)
+                            opportunities=opportunities,
+                            visa_summary=_main_admin_visa_summary(db, application))
 
 
 @app.route("/admin/applications/<int:application_id>/resend-email", methods=["POST"])
@@ -2836,7 +3250,8 @@ def admin_account_delete(user_id):
         for e in errors:
             flash(e, "danger")
         return redirect(url_for("admin_account_detail", user_id=user_id, delete=1)), 303
-    upload_dirs = {"visa_documents": VISA_DOCS_DIR, "payment_proofs": PAYMENT_PROOF_DIR}
+    upload_dirs = {"visa_documents": VISA_DOCS_DIR, "payment_proofs": PAYMENT_PROOF_DIR,
+                   "visa_application_documents": VISA_APP_DOCS_DIR}
     try:
         outcome, info = account_moderation.delete_student_account(
             g.db, user_id, admin[0], admin[1], reason, upload_dirs)
@@ -3397,6 +3812,15 @@ def visa_admin_requests():
     )
 
 
+@app.route("/visa-admin/visa-application-documents/<int:document_id>")
+@visa_admin_required
+def visa_admin_support_document(document_id):
+    """A visa assistance supporting document. Visa Admin only - the Main
+    Admin has no route to these files."""
+    row = g.db.execute("SELECT * FROM visa_documents WHERE id = ?", (document_id,)).fetchone()
+    return _send_support_document(row)
+
+
 @app.route("/visa-admin/requests/<int:request_id>", methods=["GET", "POST"])
 @visa_admin_required
 def visa_admin_request_detail(request_id):
@@ -3507,6 +3931,11 @@ def visa_admin_request_detail(request_id):
 
     return render_template(
         "visa_admin/request_detail.html", visa_request=visa_request, payments=payments, notes=notes,
+        v=visa_lib, visa_status_label=visa_lib.visa_display_status(
+            db.execute("SELECT * FROM funding_applications WHERE id = ?",
+                       (visa_request["annual_application_id"],)).fetchone()
+            if visa_request["annual_application_id"] else None,
+            visa_request, payments[0] if payments else None),
         documents=documents, history=history, tracker=tracker, fee_transactions=fee_transactions,
         refund_eligible=refund_eligible, refund_reason_hint=refund_reason_hint,
         fee_coverage_statuses=visa_lib.VISA_FEE_COVERAGE_STATUSES,

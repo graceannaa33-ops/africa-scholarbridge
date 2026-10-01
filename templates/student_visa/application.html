@@ -1,193 +1,293 @@
 {% extends "base.html" %}
-{% block title %}Visa Application — Africa ScholarBridge{% endblock %}
+{% block title %}USA Student Visa Assistance — Visa Application Form — Africa ScholarBridge{% endblock %}
 {% block content %}
+{% set r = visa_request %}
+{% macro text(field, label, type="text", required=False, placeholder="", maxlength=200) -%}
+  <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
+  <input type="{{ type }}" id="f_{{ field }}" name="{{ field }}" class="form-control" value="{{ visa_request[field] or '' }}"
+         {% if type != 'date' %}maxlength="{{ maxlength }}"{% endif %} placeholder="{{ placeholder }}" {{ 'required' if required }}>
+{%- endmacro %}
+{% macro area(field, label, rows=3, required=False, placeholder="") -%}
+  <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
+  <textarea id="f_{{ field }}" name="{{ field }}" class="form-control" rows="{{ rows }}" maxlength="2000"
+            placeholder="{{ placeholder }}" {{ 'required' if required }}>{{ visa_request[field] or '' }}</textarea>
+{%- endmacro %}
+{% macro select(field, label, options, required=False, default=None) -%}
+  <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
+  {% set current = visa_request[field] or default %}
+  <select id="f_{{ field }}" name="{{ field }}" class="form-select" {{ 'required' if required }}>
+    <option value="" {{ 'selected' if not current }}>— Select —</option>
+    {% for opt in options %}<option {{ 'selected' if current == opt }}>{{ opt }}</option>{% endfor %}
+  </select>
+{%- endmacro %}
+{% macro radios(field, label, options, required=False) -%}
+  <div class="form-label fw-semibold mb-1">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</div>
+  {% for opt in options %}
+  <div class="form-check form-check-inline">
+    <input class="form-check-input" type="radio" name="{{ field }}" id="f_{{ field }}_{{ loop.index }}" value="{{ opt }}"
+           {{ 'checked' if visa_request[field] == opt }} {{ 'required' if required }}>
+    <label class="form-check-label" for="f_{{ field }}_{{ loop.index }}">{{ opt }}</label>
+  </div>
+  {% endfor %}
+{%- endmacro %}
+{% macro checks(field, options) -%}
+  {% set picked = (visa_request[field] or '').split(', ') %}
+  <div class="row g-1">
+  {% for opt in options %}
+  <div class="col-md-6"><div class="form-check">
+    <input class="form-check-input" type="checkbox" name="{{ field }}" value="{{ opt }}" id="f_{{ field }}_{{ loop.index }}" {{ 'checked' if opt in picked }}>
+    <label class="form-check-label" for="f_{{ field }}_{{ loop.index }}">{{ opt }}</label>
+  </div></div>
+  {% endfor %}
+  </div>
+{%- endmacro %}
+
 <div class="container py-4">
-
-  <h2 class="fw-bold mb-1">🇺🇸 U.S. Student Visa Application</h2>
-  <p class="text-muted mb-4">Step {{ step_index + 1 }} of {{ steps|length }} — {{ step_titles[step_name] }}</p>
-
-  <div class="progress mb-4" style="height: 8px;">
-    <div class="progress-bar bg-success" role="progressbar"
-         style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
+  <h2 class="fw-bold mb-2">🇺🇸 USA Student Visa Assistance</h2>
+  <div class="alert alert-info small" id="visaAssistanceDisclaimer">
+    Africa ScholarBridge provides visa assistance and application guidance. We are not the U.S. government,
+    U.S. Embassy, USCIS, or any other government immigration authority. Visa approval is determined solely by the
+    relevant government authority.
   </div>
 
+  <p class="text-muted mb-1">Visa Application Form · Reference <strong>{{ r.request_number }}</strong></p>
+  <p class="text-muted mb-2">Section {{ step_index + 1 }} of {{ steps|length }} — {{ step_titles[step_name] }}</p>
+  <div class="progress mb-2" style="height: 8px;">
+    <div class="progress-bar bg-success" role="progressbar" aria-label="Visa form progress"
+         style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
+  </div>
+  {% if form_first %}
+  <p class="small text-muted mb-4">Visa Form &rarr; Document Upload &rarr; Declaration &rarr; <span class="text-muted">Payment</span> &rarr; <span class="text-muted">Application Completed</span></p>
+  {% else %}<div class="mb-4"></div>{% endif %}
+
   <div class="row justify-content-center">
-    <div class="col-lg-8">
+    <div class="col-lg-9">
       <div class="card asb-card shadow-sm">
         <div class="card-body p-4 p-md-5">
-          <form method="POST">
 
-            {% if step_name == 'personal' %}
-              <h4 class="fw-bold mb-3">Step 1 — Personal Information</h4>
+          {% if step_name == 'documents' %}
+            <h4 class="fw-bold mb-2">10. Documents Checklist</h4>
+            <p class="text-muted small">Upload the documents that apply to you. Accepted: {{ allowed_doc_extensions|join(', ')|upper }}, up to {{ max_doc_mb }} MB each.
+              Your files are stored securely and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
+            {% if required_documents %}
+            <p class="small mb-3" id="requiredDocuments"><strong>Required:</strong> {{ required_documents|join(', ') }}.
+              All other documents are optional — upload them if they apply to you.</p>
+            {% else %}
+            <p class="small mb-3" id="requiredDocuments">All documents are optional — upload the ones that apply to you.</p>
+            {% endif %}
+            {% if missing_documents %}
+            <div class="alert alert-warning small py-2">Still needed: {{ missing_documents|join(', ') }}</div>
+            {% endif %}
+            <ul class="list-group mb-3" id="documentChecklist">
+              {% for d in documents %}
+              <li class="list-group-item">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                  <span>{{ d.document_type }}
+                    {% if d.document_type in required_documents %}<span class="badge bg-danger ms-1">Required</span>
+                    {% else %}<span class="badge bg-light text-dark border ms-1">If applicable</span>{% endif %}</span>
+                  {% if d.stored_file %}
+                    <span class="d-flex align-items-center gap-2">
+                      <span class="badge bg-success">Uploaded</span>
+                      <a href="{{ url_for('student_visa_document_file', document_id=d.id) }}" target="_blank" rel="noopener" class="small">View</a>
+                      <form method="POST" action="{{ url_for('student_visa_document_remove', request_id=r.id, document_id=d.id) }}" class="d-inline">
+                        <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
+                      </form>
+                    </span>
+                  {% else %}
+                    <span class="badge bg-secondary">Not uploaded</span>
+                  {% endif %}
+                </div>
+                {% if d.stored_file %}<div class="small text-muted">{{ d.original_name }}</div>{% endif %}
+                <form method="POST" action="{{ url_for('student_visa_document_upload', request_id=r.id) }}" enctype="multipart/form-data" class="d-flex gap-2 mt-2 flex-wrap">
+                  <input type="hidden" name="document_type" value="{{ d.document_type }}">
+                  <input type="file" name="document" class="form-control form-control-sm" style="max-width: 320px;" accept=".pdf,.jpg,.jpeg,.png" required>
+                  <button type="submit" class="btn btn-sm btn-outline-primary">{{ 'Replace' if d.stored_file else 'Upload' }}</button>
+                </form>
+              </li>
+              {% endfor %}
+            </ul>
+            <form method="POST" class="d-flex justify-content-between mt-4">
+              <a href="{{ url_for('student_visa_step', request_id=r.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
+              <button type="submit" class="btn btn-primary fw-semibold">Save &amp; Continue →</button>
+            </form>
+
+          {% elif step_name == 'declaration' %}
+            <h4 class="fw-bold mb-3">12. Applicant Declaration</h4>
+            {% if missing_fields or missing_documents %}
+            <div class="alert alert-warning small">
+              Before you can sign: {% if missing_fields %}complete
+              {% for s in missing_fields|map(attribute=0)|unique %}<a href="{{ url_for('student_visa_step', request_id=r.id, step_name=s) }}">{{ step_titles[s] }}</a>{{ ', ' if not loop.last }}{% endfor %}{% endif %}
+              {% if missing_documents %}{{ '; ' if missing_fields }}upload {{ missing_documents|join(', ') }}{% endif %}.
+            </div>
+            {% endif %}
+            <table class="table table-sm small mb-3">
+              <tr><th style="width:40%">Applicant</th><td>{{ r.full_name or '—' }}</td></tr>
+              <tr><th>Visa</th><td>{{ r.visa_category or '—' }} — {{ r.destination_country or '—' }}</td></tr>
+              <tr><th>Purpose of travel</th><td>{{ r.purpose_of_travel or '—' }}</td></tr>
+              <tr><th>Documents uploaded</th><td>{{ documents|selectattr('stored_file')|list|length }}</td></tr>
+            </table>
+            <div class="border rounded p-3 bg-light mb-3" id="declarationText">
+              <p class="mb-2">I confirm that the information I have provided in this form is true and accurate to the best of my knowledge. I understand that providing false or misleading information may negatively affect my visa application.</p>
+              <p class="mb-0">I understand that Africa ScholarBridge provides visa assistance and guidance and does not guarantee visa approval. The final decision is made by the relevant embassy, consulate, immigration authority, or government agency.</p>
+            </div>
+            <form method="POST" action="{{ url_for('student_visa_submit', request_id=r.id) }}">
               <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Full Name</label>
-                  <input type="text" name="full_name" class="form-control" value="{{ visa_request.full_name or '' }}" required></div>
-                <div class="col-md-6"><label class="form-label">Date of Birth</label>
-                  <input type="date" name="date_of_birth" class="form-control" value="{{ visa_request.date_of_birth or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Gender</label>
-                  <select name="gender" class="form-select">
-                    <option value="" {{ 'selected' if not visa_request.gender }}>Prefer not to say</option>
-                    <option {{ 'selected' if visa_request.gender == 'Female' }}>Female</option>
-                    <option {{ 'selected' if visa_request.gender == 'Male' }}>Male</option>
-                    <option {{ 'selected' if visa_request.gender == 'Other' }}>Other</option>
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">Email</label>
-                  <input type="email" name="email" class="form-control" value="{{ visa_request.email or '' }}" required></div>
-                <div class="col-md-6"><label class="form-label">Phone</label>
-                  <input type="text" name="phone" class="form-control" value="{{ visa_request.phone or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Country of Residence</label>
-                  <input type="text" name="country_of_residence" class="form-control" value="{{ visa_request.country_of_residence or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Citizenship</label>
-                  <input type="text" name="citizenship" class="form-control" value="{{ visa_request.citizenship or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Passport Status</label>
-                  <select name="passport_status" class="form-select">
-                    {% for opt in ['Valid passport held', 'Applied - awaiting issuance', 'Not yet applied'] %}
-                    <option {{ 'selected' if visa_request.passport_status == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
+                <div class="col-md-7">
+                  <label class="form-label" for="declaration_name">Applicant Full Name <span class="text-danger">*</span></label>
+                  <input type="text" id="declaration_name" name="declaration_name" class="form-control" maxlength="200" required
+                         placeholder="{{ r.full_name or '' }}" autocomplete="off">
+                  <div class="form-text">Type your full name exactly as in section 1 — this is your signature.</div>
+                </div>
+                <div class="col-md-5">
+                  <label class="form-label" for="declaration_date">Date</label>
+                  <input type="date" id="declaration_date" class="form-control" value="{{ today }}" readonly>
+                </div>
+                <div class="col-12">
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="yes" id="declaration_confirmed" name="declaration_confirmed" required>
+                    <label class="form-check-label" for="declaration_confirmed">I confirm the declaration above.</label>
+                  </div>
+                </div>
+              </div>
+              <div class="d-flex justify-content-between mt-4">
+                <a href="{{ url_for('student_visa_step', request_id=r.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
+                <button type="submit" class="btn btn-primary fw-semibold">
+                  {{ 'Submit Visa Form & Continue to Payment →' if form_first and not r.payment_verified else 'Submit Visa Application' }}
+                </button>
+              </div>
+            </form>
+
+          {% else %}
+          <form method="POST">
+            {% if step_name == 'personal' %}
+              <h4 class="fw-bold mb-3">1. Applicant Personal Information</h4>
+              <div class="row g-3">
+                <div class="col-md-6">{{ text('full_name', 'Full Name', required=True) }}</div>
+                <div class="col-md-6">{{ text('date_of_birth', 'Date of Birth', type='date', required=True) }}</div>
+                <div class="col-md-6">{{ radios('gender', 'Gender', v.GENDERS, required=True) }}</div>
+                <div class="col-md-6">{{ text('citizenship', 'Nationality', required=True) }}</div>
+                <div class="col-md-6">{{ text('country_of_residence', 'Country of Residence', required=True) }}</div>
+                <div class="col-md-6">{{ text('national_id_number', 'National ID Number', maxlength=40) }}</div>
+                <div class="col-md-6">{{ select('marital_status', 'Marital Status', v.MARITAL_STATUSES) }}</div>
               </div>
 
-            {% elif step_name == 'education' %}
-              <h4 class="fw-bold mb-3">Step 2 — Education</h4>
+            {% elif step_name == 'contact' %}
+              <h4 class="fw-bold mb-3">2. Contact Information</h4>
               <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Current Education Level</label>
-                  <select name="education_level" class="form-select">
-                    {% for lvl in ['Undergraduate', "Master's", 'PhD', 'Vocational/Technical', 'High School'] %}
-                    <option {{ 'selected' if visa_request.education_level == lvl }}>{{ lvl }}</option>
-                    {% endfor %}
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">U.S. Institution</label>
-                  <input type="text" name="us_institution" class="form-control" value="{{ visa_request.us_institution or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Program</label>
-                  <input type="text" name="program" class="form-control" value="{{ visa_request.program or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Degree</label>
-                  <input type="text" name="degree" class="form-control" value="{{ visa_request.degree or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Intended Start Date</label>
-                  <input type="date" name="intended_start_date" class="form-control" value="{{ visa_request.intended_start_date or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Admission Status</label>
-                  <select name="admission_status" class="form-select">
-                    {% for opt in ['Admitted', 'Conditionally Admitted', 'Applied - pending decision', 'Not yet applied'] %}
-                    <option {{ 'selected' if visa_request.admission_status == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">I-20 Status</label>
-                  <select name="i20_status" class="form-select">
-                    {% for opt in ['I-20 received', 'I-20 requested', 'Not yet requested'] %}
-                    <option {{ 'selected' if visa_request.i20_status == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
+                <div class="col-md-6">{{ text('email', 'Email Address', type='email', required=True) }}</div>
+                <div class="col-md-6">{{ text('phone', 'Phone Number', required=True, maxlength=30) }}</div>
+                <div class="col-md-6">{{ text('alt_phone', 'Alternative Phone Number', maxlength=30) }}</div>
+                <div class="col-md-6">{{ text('city', 'City/Town') }}</div>
+                <div class="col-12">{{ area('current_address', 'Current Address', rows=2) }}</div>
+                <div class="col-md-6">{{ text('contact_country', 'Country') }}</div>
+              </div>
+
+            {% elif step_name == 'passport' %}
+              <h4 class="fw-bold mb-3">3. Passport Information</h4>
+              <div class="mb-3">{{ radios('passport_status', 'Passport', v.PASSPORT_STATUSES, required=True) }}</div>
+              <p class="small text-muted">Fill in the details below if you have a valid passport.</p>
+              <div class="row g-3">
+                <div class="col-md-6">{{ text('passport_number', 'Passport Number', maxlength=20) }}</div>
+                <div class="col-md-6">{{ select('passport_type', 'Passport Type', v.PASSPORT_TYPES) }}</div>
+                <div class="col-md-6">{{ text('passport_issue_date', 'Date of Issue', type='date') }}</div>
+                <div class="col-md-6">{{ text('passport_expiry_date', 'Date of Expiry', type='date') }}</div>
+                <div class="col-md-6">{{ text('passport_place_of_issue', 'Place of Issue') }}</div>
+                <div class="col-md-6">{{ text('passport_issuing_country', 'Issuing Country') }}</div>
               </div>
 
             {% elif step_name == 'visa_info' %}
-              <h4 class="fw-bold mb-3">Step 3 — Visa Information</h4>
+              <h4 class="fw-bold mb-3">4. Visa Information</h4>
+              <div class="alert alert-light border small">For Africa ScholarBridge study funding this is usually a <strong>Student Visa</strong> for the <strong>United States of America</strong>.</div>
               <div class="row g-3">
-                <div class="col-md-6"><label class="form-label">Visa Category</label>
-                  <select name="visa_category" class="form-select">
-                    {% for opt in ['F-1', 'M-1', 'J-1'] %}
-                    <option {{ 'selected' if visa_request.visa_category == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">Application Type</label>
-                  <select name="application_type" class="form-select">
-                    {% for opt in ['New Application', 'Continuing Student'] %}
-                    <option {{ 'selected' if visa_request.application_type == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">Previous U.S. Visa</label>
-                  <select name="previous_us_visa" class="form-select">
-                    <option value="No" {{ 'selected' if visa_request.previous_us_visa == 'No' }}>No</option>
-                    <option value="Yes" {{ 'selected' if visa_request.previous_us_visa == 'Yes' }}>Yes</option>
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">Previous Visa Refusal</label>
-                  <select name="previous_refusal" class="form-select">
-                    <option value="No" {{ 'selected' if visa_request.previous_refusal == 'No' }}>No</option>
-                    <option value="Yes" {{ 'selected' if visa_request.previous_refusal == 'Yes' }}>Yes</option>
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">DS-160 Status</label>
-                  <select name="ds160_status" class="form-select">
-                    {% for opt in ['Not started', 'In progress', 'Submitted'] %}
-                    <option {{ 'selected' if visa_request.ds160_status == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
-                <div class="col-md-6"><label class="form-label">SEVIS Information</label>
-                  <input type="text" name="sevis_info" class="form-control" placeholder="SEVIS ID, if available" value="{{ visa_request.sevis_info or '' }}"></div>
-                <div class="col-md-6"><label class="form-label">Interview Status</label>
-                  <select name="interview_status" class="form-select">
-                    {% for opt in ['Not scheduled', 'Scheduled', 'Completed'] %}
-                    <option {{ 'selected' if visa_request.interview_status == opt }}>{{ opt }}</option>
-                    {% endfor %}
-                  </select></div>
+                <div class="col-md-6">{{ text('destination_country', 'Country You Want to Visit', required=True) }}</div>
+                <div class="col-md-6">{{ select('visa_category', 'Visa Type', v.VISA_TYPES, required=True, default=v.DEFAULT_VISA_TYPE) }}</div>
+                <div class="col-12">{{ area('purpose_of_travel', 'Purpose of Travel', rows=2, required=True) }}</div>
+                <div class="col-md-4">{{ text('intended_arrival_date', 'Intended Date of Arrival', type='date') }}</div>
+                <div class="col-md-4">{{ text('intended_departure_date', 'Intended Date of Departure', type='date') }}</div>
+                <div class="col-md-4">{{ text('expected_length_of_stay', 'Expected Length of Stay', placeholder='e.g. 4 years') }}</div>
+              </div>
+              <details class="mt-4" {{ 'open' if r.us_institution or r.program }}>
+                <summary class="fw-semibold">U.S. study details (optional)</summary>
+                <div class="row g-3 mt-1">
+                  <div class="col-md-6">{{ text('us_institution', 'U.S. Institution') }}</div>
+                  <div class="col-md-6">{{ text('program', 'Program') }}</div>
+                  <div class="col-md-6">{{ text('degree', 'Degree') }}</div>
+                  <div class="col-md-6">{{ text('intended_start_date', 'Intended Start Date', type='date') }}</div>
+                  <div class="col-md-6">{{ text('admission_status', 'Admission Status', placeholder='e.g. Admitted, Applied') }}</div>
+                  <div class="col-md-6">{{ text('i20_status', 'I-20 Status') }}</div>
+                  <div class="col-md-6">{{ text('ds160_status', 'DS-160 Status') }}</div>
+                  <div class="col-md-6">{{ text('sevis_info', 'SEVIS Information', placeholder='SEVIS ID, if available') }}</div>
+                  <div class="col-md-6">{{ text('interview_status', 'Interview Status') }}</div>
+                  <div class="col-md-6">{{ text('application_type', 'Application Type') }}</div>
+                  <div class="col-md-6">{{ text('previous_us_visa', 'Previous U.S. Visa') }}</div>
+                </div>
+              </details>
+
+            {% elif step_name == 'education' %}
+              <h4 class="fw-bold mb-3">5. Education / Employment Information</h4>
+              <div class="row g-3">
+                <div class="col-md-6">{{ select('current_status', 'Current Status', v.CURRENT_STATUSES, required=True) }}</div>
+                <div class="col-md-6">{{ text('education_level', 'Education Level') }}</div>
+                <div class="col-md-6">{{ text('organization_name', 'School/University/Employer/Business Name') }}</div>
+                <div class="col-md-6">{{ text('position_course', 'Position/Course') }}</div>
+                <div class="col-12">{{ area('organization_address', 'Address', rows=2) }}</div>
+                <div class="col-md-6">{{ text('organization_contact', 'Phone/Email') }}</div>
               </div>
 
             {% elif step_name == 'financial' %}
-              <h4 class="fw-bold mb-3">Step 4 — Financial Information</h4>
-              <p class="text-muted small">How will your studies be funded? Select all that apply.</p>
-              <div class="row g-2">
-                {% set selected_sources = (visa_request.funding_sources or '').split(', ') %}
-                {% for opt in ['Scholarship', 'Sponsorship', 'Family Funding', 'Personal Funds', 'Other Funding'] %}
-                <div class="col-md-6 form-check">
-                  <input class="form-check-input" type="checkbox" name="funding_sources" value="{{ opt }}" id="fs{{ loop.index }}"
-                         {{ 'checked' if opt in selected_sources }}>
-                  <label class="form-check-label" for="fs{{ loop.index }}">{{ opt }}</label>
-                </div>
-                {% endfor %}
+              <h4 class="fw-bold mb-3">6. Financial Information</h4>
+              <div class="row g-3">
+                <div class="col-md-6">{{ select('trip_payer', 'Who will pay for your trip?', v.TRIP_PAYERS, required=True) }}</div>
+                <div class="col-md-6">{{ text('travel_budget', 'Estimated Travel Budget', placeholder='e.g. USD 5,000') }}</div>
+                <div class="col-12"><div class="form-label fw-semibold">Source of Funds</div>{{ checks('funding_sources', v.FUND_SOURCES) }}</div>
               </div>
 
-            {% elif step_name == 'documents' %}
-              <h4 class="fw-bold mb-3">Step 5 — Documents</h4>
-              <p class="text-muted small">Manage your document checklist on the <a href="{{ url_for('student_visa_documents') }}" target="_blank">Documents</a> page. Requirements can vary — verify current requirements with official U.S. government resources.</p>
-              <ul class="list-group">
-                {% for d in documents %}
-                <li class="list-group-item d-flex justify-content-between align-items-center">
-                  {{ d.document_type }} {{ '(required)' if d.is_required else '(if applicable)' }}
-                  <span class="badge {{ 'bg-success' if d.status != 'Missing' else 'bg-secondary' }}">{{ d.status }}</span>
-                </li>
-                {% endfor %}
-              </ul>
-
-            {% elif step_name == 'assistance' %}
-              <h4 class="fw-bold mb-3">Step 6 — Assistance Required</h4>
-              <p class="text-muted small">What would you like Africa ScholarBridge to help with? Select all that apply.</p>
-              <div class="row g-2">
-                {% set selected_assist = (visa_request.assistance_required or '').split(', ') %}
-                {% for opt in ['DS-160 Guidance', 'Document Preparation', 'Application Review', 'Appointment Guidance', 'Interview Preparation', 'General Guidance', 'Full Assistance'] %}
-                <div class="col-md-6 form-check">
-                  <input class="form-check-input" type="checkbox" name="assistance_required" value="{{ opt }}" id="as{{ loop.index }}"
-                         {{ 'checked' if opt in selected_assist }}>
-                  <label class="form-check-label" for="as{{ loop.index }}">{{ opt }}</label>
-                </div>
-                {% endfor %}
+            {% elif step_name == 'accommodation' %}
+              <h4 class="fw-bold mb-3">7. Accommodation Information</h4>
+              <div class="row g-3">
+                <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay?', v.ACCOMMODATION_TYPES, required=True) }}</div>
+                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation') }}</div>
+                <div class="col-12">{{ area('accommodation_address', 'Address', rows=2) }}</div>
+                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email') }}</div>
               </div>
 
-            {% elif step_name == 'review' %}
-              <h4 class="fw-bold mb-3">Step 7 — Final Review</h4>
-              <p class="text-muted small mb-3">Review your answers below. You can edit any step before submitting.</p>
-              <table class="table table-sm">
-                <tr><th>Full Name</th><td>{{ visa_request.full_name or '—' }}</td></tr>
-                <tr><th>Email</th><td>{{ visa_request.email or '—' }}</td></tr>
-                <tr><th>U.S. Institution</th><td>{{ visa_request.us_institution or '—' }}</td></tr>
-                <tr><th>Program / Degree</th><td>{{ visa_request.program or '—' }} / {{ visa_request.degree or '—' }}</td></tr>
-                <tr><th>Visa Category</th><td>{{ visa_request.visa_category or '—' }}</td></tr>
-                <tr><th>Funding Sources</th><td>{{ visa_request.funding_sources or '—' }}</td></tr>
-                <tr><th>Assistance Requested</th><td>{{ visa_request.assistance_required or '—' }}</td></tr>
-              </table>
-              <div class="alert alert-warning small">
-                Submitting starts Africa ScholarBridge's up-to-2-week assistance timeline. This is not a
-                promise of U.S. government visa approval or a specific U.S. government appointment/processing timeline.
+            {% elif step_name == 'travel_history' %}
+              <h4 class="fw-bold mb-3">8. Travel History</h4>
+              <div class="mb-2">{{ radios('travelled_before', 'Have you travelled outside your country before?', v.YES_NO, required=True) }}</div>
+              <div class="mb-4">{{ area('countries_visited', 'If Yes: Country/Countries Visited', rows=2) }}</div>
+              <div class="mb-2">{{ radios('previous_application', 'Have you previously applied for a visa to your intended destination?', v.YES_NO, required=True) }}</div>
+              <div class="row g-3">
+                <div class="col-md-6">{{ text('previous_application_date', 'If Yes: Date of Previous Application', type='date') }}</div>
+                <div class="col-md-6">{{ select('previous_visa_approved', 'Was the visa approved?', v.YES_NO) }}</div>
+                <div class="col-12">{{ area('previous_refusal_explanation', 'If refused, briefly explain', rows=2) }}</div>
               </div>
+
+            {% elif step_name == 'legal' %}
+              <h4 class="fw-bold mb-3">9. Immigration / Legal Questions</h4>
+              {% for q, field, label in [('overstayed', 'overstayed_explanation', 'Have you ever overstayed a visa or violated immigration rules?'),
+                                          ('refused_entry', 'refused_entry_explanation', 'Have you ever been refused entry into another country?'),
+                                          ('visa_refused', 'visa_refused_explanation', 'Have you ever had a visa application refused?')] %}
+              <div class="mb-1">{{ radios(q, label, v.YES_NO, required=True) }}</div>
+              <div class="mb-4">{{ area(field, 'If Yes, please explain', rows=2) }}</div>
+              {% endfor %}
+
+            {% elif step_name == 'additional' %}
+              <h4 class="fw-bold mb-3">11. Additional Information</h4>
+              <div class="mb-3">{{ area('additional_information', 'Is there anything else you would like us to know about your application?', rows=6) }}</div>
+              <div class="form-label fw-semibold">What would you like Africa ScholarBridge to help with? (optional)</div>
+              {{ checks('assistance_required', v.ASSISTANCE_OPTIONS) }}
             {% endif %}
 
             <div class="d-flex justify-content-between mt-4">
               {% if step_index > 0 %}
-                <a href="{{ url_for('student_visa_step', request_id=visa_request.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
+                <a href="{{ url_for('student_visa_step', request_id=r.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
               {% else %}
                 <span></span>
               {% endif %}
-              <button type="submit" class="btn btn-primary fw-semibold">
-                {{ 'Submit Application' if step_name == 'review' else 'Save & Continue →' }}
-              </button>
+              <button type="submit" class="btn btn-primary fw-semibold">Save &amp; Continue →</button>
             </div>
           </form>
+          {% endif %}
         </div>
       </div>
     </div>

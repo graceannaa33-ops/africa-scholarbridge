@@ -16,7 +16,7 @@ forensic destruction on the physical storage device.
 |---|---|
 | All of the student's rows are deleted from the active SQLite database in one transaction. | Render disk snapshots/backups taken before the deletion still contain the old database and files until they expire. Check your Render dashboard for retention. |
 | SQLite `secure_delete` is on for the deletion, so SQLite overwrites the freed database pages with zeros instead of leaving the old content in the file's free space. | Filesystem/SSD-level remnants: deleted files are unlinked (not overwritten), and the temporary SQLite rollback journal is removed after commit. The storage device may keep old blocks until they are reused. |
-| The student's uploaded files are removed from `uploads/visa_documents/` and `uploads/payment_proofs/`. | Emails already sent to the student or to admins (confirmations, notifications, alerts). |
+| The student's uploaded files are removed from `uploads/visa_documents/`, `uploads/payment_proofs/` and `uploads/visa_application_documents/`. | Emails already sent to the student or to admins (confirmations, notifications, alerts). |
 | | Server/Render logs, copies someone downloaded, external systems (M-PESA, banks, providers). |
 
 Do not tell a student that their data is "unrecoverable from every system".
@@ -35,8 +35,8 @@ In one database transaction (`account_moderation.delete_student_account`):
 Before committing, the app checks every table's foreign keys for any row still pointing at the student's ids, and runs `PRAGMA foreign_key_check`. If anything is left, the whole transaction is rolled back.
 
 **Files**, deleted only after the database commit succeeds:
-`UPLOAD_ROOT/visa_documents/<name>` and `UPLOAD_ROOT/payment_proofs/<name>` (on Render, `UPLOAD_ROOT=/var/data/uploads`).
-These are the only folders the app stores files in. The paths in `documents.file_path`, `visa_documents.file_path` and the receipt-path columns are text placeholders with no file behind them. They are deleted with their rows.
+`UPLOAD_ROOT/visa_documents/<name>`, `UPLOAD_ROOT/payment_proofs/<name>` and `UPLOAD_ROOT/visa_application_documents/<name>` (visa assistance supporting documents) (on Render, `UPLOAD_ROOT=/var/data/uploads`).
+These are the only folders the app stores files in. The paths in `documents.file_path`, `visa_documents.file_path` and the receipt-path columns are text placeholders with no file behind them; real supporting documents use `visa_documents.stored_file`. They are deleted with their rows.
 
 ## Registering again after deletion
 

@@ -38,6 +38,32 @@
         </div>
       </div>
 
+      <div class="card asb-card mb-4" id="visaApplicationForm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <h5 class="fw-bold mb-0">Visa Application Form</h5>
+            <span class="badge bg-info text-dark">Visa status: {{ visa_status_label }}</span>
+          </div>
+          <p class="small text-muted mb-3">
+            {% if visa_request.form_submitted_at %}Submitted {{ visa_request.form_submitted_at }} UTC
+              — declaration signed by <strong>{{ visa_request.declaration_name }}</strong> on {{ visa_request.declaration_date }}.
+            {% else %}Not submitted yet.{% endif %}
+            {% if visa_request.form_first %}<span class="badge bg-light text-dark border ms-1">Funding application: form before payment</span>{% endif %}
+          </p>
+          {% for step in v.VISA_APPLICATION_STEPS if step not in ('documents', 'declaration') %}
+            {% set fields = v.VISA_STEP_FIELDS[step] + v.MULTI_FIELDS.get(step, []) %}
+            <h6 class="fw-bold small mt-3 mb-1">{{ loop.index if loop.index < 10 else loop.index + 1 }}. {{ v.VISA_STEP_TITLES[step] }}</h6>
+            <table class="table table-sm small mb-1">
+              {% for f in fields if visa_request[f] %}
+              <tr><th style="width:40%">{{ v.VISA_FIELD_LABELS.get(f, f) }}</th><td style="white-space: pre-wrap;">{{ visa_request[f] }}</td></tr>
+              {% else %}
+              <tr><td class="text-muted">—</td></tr>
+              {% endfor %}
+            </table>
+          {% endfor %}
+        </div>
+      </div>
+
       <div class="card asb-card mb-4">
         <div class="card-body">
           <h5 class="fw-bold mb-3">Payments (M-PESA, manually verified)</h5>
@@ -147,7 +173,9 @@
           <h5 class="fw-bold mb-3">Documents</h5>
           <ul class="list-unstyled small mb-2">
             {% for d in documents %}
-            <li>{{ d.document_type }} — <span class="badge {{ 'bg-success' if d.status in ['Uploaded','Verified'] else 'bg-warning text-dark' if d.status == 'Replacement Requested' else 'bg-secondary' }}">{{ d.status }}</span></li>
+            <li>{{ d.document_type }} — <span class="badge {{ 'bg-success' if d.status in ['Uploaded','Verified'] else 'bg-warning text-dark' if d.status == 'Replacement Requested' else 'bg-secondary' }}">{{ d.status }}</span>
+              {% if d.stored_file %}<a href="{{ url_for('visa_admin_support_document', document_id=d.id) }}" target="_blank" rel="noopener" class="ms-1">Open</a>
+              <span class="text-muted">({{ d.original_name }}{% if d.file_size %}, {{ (d.file_size / 1024)|round|int }} KB{% endif %})</span>{% endif %}</li>
             {% endfor %}
           </ul>
           <a href="{{ url_for('visa_admin_documents') }}" class="btn btn-sm btn-outline-primary">Manage Documents &rarr;</a>

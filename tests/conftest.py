@@ -65,11 +65,34 @@ def student(client):
         "country": "Kenya", "citizenship": "Kenyan", "phone": "0712345678",
         "email": email, "gender": "Female",
     })
+    complete_steps_before_visa(client)
     db = get_db()
     user = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
     stu = db.execute("SELECT id FROM students WHERE user_id = ?", (user["id"],)).fetchone()
     db.close()
     return {"email": email, "student_id": stu["id"]}
+
+
+def complete_steps_before_visa(client):
+    """Every Start Application step after "personal", up to and including
+    Review - so the student stands at the FINAL step, Visa Verification."""
+    client.post("/application/step/education", data={
+        "institution": "University of Nairobi", "education_level": "Undergraduate", "course": "BSc Computer Science",
+        "field_of_study": "Computer Science", "year_of_study": "2", "graduation_year": "2027", "academic_info": ""})
+    client.post("/application/step/funding_need", data={
+        "funding_type_needed": "Full tuition", "tuition_need": "Full", "accommodation_need": "Partial",
+        "living_expenses_need": "Partial", "books_need": "Partial", "transport_need": "Not Needed",
+        "technology_need": "Not Needed", "other_expenses": ""})
+    client.post("/application/step/financial", data={
+        "household_situation": "Single parent household", "source_of_support": "Family",
+        "estimated_financial_need": "USD 3,000 / year", "funding_already_received": ""})
+    client.post("/application/step/preferences", data={"preferences": ["International Study", "Scholarship"]})
+    client.post("/application/step/statement", data={"personal_statement": "I want to study computer science."})
+    client.post("/application/step/documents", data={})
+    client.get("/application/step/bank")          # decides whether bank details are needed
+    r = client.post("/application/step/review", data={})
+    assert r.status_code == 302 and r.headers["Location"].endswith("/application/step/visa"), r.headers.get("Location")
+    return r
 
 
 def get_application(student_id):
@@ -252,3 +275,48 @@ def upload(client, form, file_bytes, filename):
 
 def choose_yes(client):
     return client.post("/application/step/visa", data={"visa_choice": "yes"})
+
+
+VISA_FORM_ANSWERS = {
+    "personal": {"full_name": APPLICANT["full_name"], "date_of_birth": APPLICANT["date_of_birth"], "gender": "Female",
+                 "citizenship": "Kenyan", "country_of_residence": "Kenya", "national_id_number": "34567890",
+                 "marital_status": "Single"},
+    "contact": {"email": "amina@example.com", "phone": "0712345678", "alt_phone": "", "current_address": "Ngong Rd",
+                "city": "Nairobi", "contact_country": "Kenya"},
+    "passport": {"passport_status": "I have a valid passport", "passport_number": "AK1234567",
+                 "passport_type": "Ordinary", "passport_issue_date": "2024-01-10", "passport_expiry_date": "2034-01-09",
+                 "passport_place_of_issue": "Nairobi", "passport_issuing_country": "Kenya"},
+    "visa_info": {"destination_country": "United States of America", "visa_category": "Student Visa",
+                  "purpose_of_travel": "Undergraduate study", "intended_arrival_date": "2027-08-15",
+                  "intended_departure_date": "2031-06-01", "expected_length_of_stay": "4 years"},
+    "education": {"current_status": "Student", "education_level": "Undergraduate",
+                  "organization_name": "University of Nairobi", "position_course": "BSc Computer Science",
+                  "organization_address": "Nairobi", "organization_contact": "info@uon.ac.ke"},
+    "financial": {"trip_payer": "Sponsor", "travel_budget": "USD 5,000", "funding_sources": ["Scholarship", "Family Support"]},
+    "accommodation": {"accommodation_type": "University Accommodation", "accommodation_name": "Campus housing",
+                      "accommodation_address": "Campus", "accommodation_contact": "housing@example.edu"},
+    "travel_history": {"travelled_before": "No", "previous_application": "No"},
+    "legal": {"overstayed": "No", "refused_entry": "No", "visa_refused": "No"},
+    "documents": {},
+    "additional": {"additional_information": "First time applying.", "assistance_required": ["DS-160 Guidance"]},
+}
+
+
+def upload_visa_support_doc(client, request_id, doc_type, data=None, filename="doc.png"):
+    payload = {"document_type": doc_type,
+               "document": (io.BytesIO(PNG_BYTES if data is None else data), filename)}
+    return client.post(f"/student-visa/application/{request_id}/documents/upload", data=payload,
+                       content_type="multipart/form-data")
+
+
+def complete_visa_form(client, request_id, sign=True):
+    """Fill all 12 sections, upload the required documents and (optionally)
+    sign the declaration of a form-first visa assistance request."""
+    for step, answers in VISA_FORM_ANSWERS.items():
+        r = client.post(f"/student-visa/application/{request_id}/step/{step}", data=answers)
+        assert r.status_code == 302, (step, r.status_code)
+    upload_visa_support_doc(client, request_id, "Passport-size Photograph")
+    upload_visa_support_doc(client, request_id, "Valid Passport", make_pdf(["PASSPORT"]), "passport.pdf")
+    if sign:
+        return client.post(f"/student-visa/application/{request_id}/submit",
+                           data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})

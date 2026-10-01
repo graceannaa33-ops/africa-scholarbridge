@@ -3,13 +3,7 @@
 {% block content %}
 <div class="container py-4">
 
-  <h2 class="fw-bold mb-1">Annual Funding Application</h2>
-  <p class="text-muted mb-4">Step {{ step_index + 1 }} of {{ steps|length }}</p>
-
-  <div class="progress mb-4" style="height: 8px;">
-    <div class="progress-bar bg-success" role="progressbar"
-         style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
-  </div>
+  {% include '_application_progress.html' %}
 
   <div class="row justify-content-center">
     <div class="col-lg-8">
@@ -18,7 +12,7 @@
           <form method="POST">
 
             {% if step_name == 'personal' %}
-              <h4 class="fw-bold mb-3">Step 1 — Personal Information</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Personal Information</h4>
               <div class="row g-3">
                 <div class="col-md-6"><label class="form-label">Full Name</label>
                   <input type="text" name="full_name" class="form-control" value="{{ application.full_name or '' }}" required></div>
@@ -42,7 +36,7 @@
               </div>
 
             {% elif step_name == 'education' %}
-              <h4 class="fw-bold mb-3">Step 2 — Education</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Education</h4>
               <div class="row g-3">
                 <div class="col-md-6"><label class="form-label">Institution</label>
                   <input type="text" name="institution" class="form-control" value="{{ application.institution or '' }}"></div>
@@ -65,7 +59,7 @@
               </div>
 
             {% elif step_name == 'funding_need' %}
-              <h4 class="fw-bold mb-3">Step 3 — Funding Need</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Funding Need</h4>
               <div class="row g-3">
                 <div class="col-12"><label class="form-label">Funding Type Needed</label>
                   <input type="text" name="funding_type_needed" class="form-control" value="{{ application.funding_type_needed or '' }}" placeholder="e.g. Full tuition, partial support"></div>
@@ -85,7 +79,7 @@
               </div>
 
             {% elif step_name == 'financial' %}
-              <h4 class="fw-bold mb-3">Step 4 — Financial Information</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Financial Information</h4>
               <div class="row g-3">
                 <div class="col-12"><label class="form-label">Household Financial Situation</label>
                   <textarea name="household_situation" class="form-control" rows="2">{{ application.household_situation or '' }}</textarea></div>
@@ -98,7 +92,7 @@
               </div>
 
             {% elif step_name == 'preferences' %}
-              <h4 class="fw-bold mb-3">Step 5 — Funding Preferences</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Funding Preferences</h4>
               <p class="text-muted">Select everything that applies to your funding search.</p>
               {% set current_prefs = (application.preferences or '').split(', ') %}
               <div class="row g-2">
@@ -116,12 +110,12 @@
               </div>
 
             {% elif step_name == 'statement' %}
-              <h4 class="fw-bold mb-3">Step 6 — Personal Statement</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Personal Statement</h4>
               <p class="text-muted">Tell us about your educational goals, financial need, career goals, and why funding matters to you and your community.</p>
               <textarea name="personal_statement" class="form-control" rows="10" placeholder="Write your personal statement here...">{{ application.personal_statement or '' }}</textarea>
 
             {% elif step_name == 'documents' %}
-              <h4 class="fw-bold mb-3">Step 7 — Documents</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>
               <p class="text-muted">Here is the document checklist for your application. You can upload these now or later from the Documents page.</p>
               <ul class="list-group mb-3">
                 {% for d in documents %}
@@ -134,8 +128,8 @@
               <a href="{{ url_for('documents') }}" class="btn btn-sm btn-outline-primary">Manage Documents</a>
 
             {% elif step_name == 'review' %}
-              <h4 class="fw-bold mb-3">Step 8 — Review Your Application</h4>
-              <p class="text-muted">Please review your information below before submitting.</p>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Review Your Application</h4>
+              <p class="text-muted">Please review your information below. The final step after this review is <strong>Visa Verification</strong>.</p>
               <table class="table table-sm">
                 <tr><th>Full Name</th><td>{{ application.full_name }}</td></tr>
                 <tr><th>Country</th><td>{{ application.country }}</td></tr>
@@ -144,18 +138,12 @@
                 <tr><th>Field of Study</th><td>{{ application.field_of_study }}</td></tr>
                 <tr><th>Funding Type Needed</th><td>{{ application.funding_type_needed }}</td></tr>
                 <tr><th>Estimated Financial Need</th><td>{{ application.estimated_financial_need }}</td></tr>
-                <tr><th>🇺🇸 Visa Requirement</th>
+                <tr><th>🇺🇸 Visa Verification</th>
                   <td>
-                    {% if application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}
-                      <span class="badge bg-success">✓ Complete - Visa Information Verified</span>
-                    {% elif application.visa_step_status == 'COMPLETE' %}
-                      <span class="badge bg-success">✓ Complete - Visa Assistance Paid</span>
-                    {% elif application.visa_step_status == 'NOT_REQUIRED' %}
-                      <span class="badge bg-success">✓ Already Has Visa Arrangements</span>
-                    {% elif application.visa_step_status == 'ACTION_REQUIRED' %}
-                      <span class="badge bg-warning text-dark">⚠ Action Required</span>
+                    {% if application.visa_step_status == 'COMPLETE' %}
+                      <span class="badge bg-success">✓ Complete</span>
                     {% else %}
-                      <span class="badge bg-secondary">Not yet answered</span>
+                      <span class="badge bg-secondary">Final step — next, after this review</span>
                     {% endif %}
                   </td>
                 </tr>
@@ -188,7 +176,7 @@
                 <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">Cancel</a>
               {% endif %}
               <button type="submit" class="btn btn-primary fw-semibold">
-                {{ 'Continue to Submit' if step_name == 'review' else 'Save &amp; Continue' }} &rarr;
+                {{ 'Continue to Visa Verification' if step_name == 'review' else 'Save &amp; Continue' }} &rarr;
               </button>
             </div>
           </form>

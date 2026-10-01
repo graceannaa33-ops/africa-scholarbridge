@@ -53,8 +53,14 @@
           {% if application[f] %}<span class="text-success fw-bold">✓</span>{% else %}<span class="text-muted">○</span>{% endif %}
         </li>
         {% endfor %}
+        {% for f, label in [('personal_statement','Personal Statement')] %}
         <li class="list-group-item d-flex justify-content-between align-items-center">
-          🇺🇸 Visa Requirement
+          {{ label }}
+          {% if application[f] %}<span class="text-success fw-bold">✓</span>{% else %}<span class="text-muted">○</span>{% endif %}
+        </li>
+        {% endfor %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          🇺🇸 Visa Verification <span class="small text-muted">(final step)</span>
           {% if application.visa_step_status == 'COMPLETE' %}
             <span class="badge bg-success">✓ COMPLETE</span>
           {% elif application.visa_step_status == 'NOT_REQUIRED' %}
@@ -65,12 +71,6 @@
             <span class="text-muted">○</span>
           {% endif %}
         </li>
-        {% for f, label in [('personal_statement','Personal Statement')] %}
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-          {{ label }}
-          {% if application[f] %}<span class="text-success fw-bold">✓</span>{% else %}<span class="text-muted">○</span>{% endif %}
-        </li>
-        {% endfor %}
       </ul>
 
       {% if application.visa_step_status == 'ACTION_REQUIRED' and application.visa_status == 'HAS_VISA' %}
@@ -80,7 +80,11 @@
         </div>
       {% elif application.visa_step_status == 'ACTION_REQUIRED' %}
         <div class="alert alert-warning small d-flex justify-content-between align-items-center flex-wrap gap-2 mb-0">
+          {% if visa_request and visa_request.form_first and not visa_request.form_submitted_at %}
+          <span>🇺🇸 Visa Assistance — complete your visa application form, documents and declaration</span>
+          {% else %}
           <span>🇺🇸 Visa Assistance — Payment: {{ format_price(visa_request) if visa_request else 'KSh 1,500' }}</span>
+          {% endif %}
           <a href="{{ url_for('application_step', step_name='visa') }}" class="btn btn-sm btn-warning fw-semibold">Complete Visa Assistance</a>
         </div>
       {% elif application.visa_step_status == 'COMPLETE' and application.visa_status == 'HAS_VISA' %}

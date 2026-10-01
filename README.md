@@ -1014,3 +1014,69 @@ This lists every `render_template()` template with OK/MISSING, and checks `{% ex
 targets, Jinja syntax, every `url_for()` endpoint, every static file, every form's HTTP method, and
 Python syntax. It uses a temporary database, never your real one. It must end with
 `ALL CHECKS PASSED`.
+
+## 22. 🇺🇸 Visa Verification Is the FINAL Step of Start Application
+
+This supersedes the step order in sections 16–17. The applicant is asked about their visa only after every other step:
+
+**1. Personal Information → 2. Education → 3. Funding Need → 4. Financial Information → 5. Preferences →
+6. Personal Statement → 7. Documents → 8. Payment Information (only if needed) → 9. Review → 10. Visa Verification**
+
+The visa step can't be opened, and a visa answer can't be posted, until Review has been submitted. The final
+submission is refused until the visa requirement has passed.
+
+**"✅ Yes, I already have a visa"**
+- Upload the visa (PDF, JPG, JPEG or PNG, max 8 MB).
+- The existing automatic checks still apply. Only a visa that passes them shows **"Visa uploaded successfully"**.
+- A failure moves the applicant to visa assistance, keeping all their data.
+- The applicant then submits the application, gets a reference number and sees the confirmation page.
+
+**"❌ No, I do not have a visa"** → **USA Student Visa Assistance**, in this order:
+1. The 12-section visa application form, pre-filled from the funding application.
+2. Secure document uploads.
+3. The applicant declaration.
+4. Payment: the existing M-PESA flow and the configured Visa Assistance Service Fee. It isn't available until
+   the declaration is signed.
+5. When the Visa Admin verifies the payment, the visa request is marked Paid and moves to review, and the annual
+   application is **submitted automatically** (reference number, confirmation email, matching).
+
+The applicant then sees "Application Completed Successfully".
+
+**Required before the declaration**
+- The key fields of each section (`visa.VISA_REQUIRED_FIELDS`). Explanations are required only when a
+  Travel History or Immigration/Legal question is answered "Yes".
+- The declaration name must match the full name, and the declaration box must be ticked.
+- **Documents are a configurable policy** (the specification did not fix which are mandatory), set with the
+  `VISA_REQUIRED_DOCUMENTS` environment variable:
+  - `photo,identity` (the default): a passport-size photograph, plus a passport copy, or a National ID when the
+    applicant has no passport;
+  - `photo` or `identity`: only that one;
+  - `none`: every document optional.
+
+  All other checklist documents are always optional.
+
+**Supporting documents**
+- Stored under `UPLOAD_ROOT/visa_application_documents/` with random names.
+- Checked by extension *and* file signature, max 8 MB.
+- Viewable only by the applicant (`/student-visa/documents/file/<id>`) and the Visa Admin
+  (`/visa-admin/visa-application-documents/<id>`).
+- Removed by permanent account deletion.
+
+**Database:** new columns on the existing `visa_requests` (form fields, `declaration_*`, `form_submitted_at`,
+`form_first`) and on `visa_documents` (`stored_file`, `original_name`, `file_size`). They are added automatically at
+start-up; there are no new tables.
+
+**Older records**
+- `form_first = 1` marks requests raised from the final step.
+- Older requests that already have a payment keep the pay-first order.
+- The standalone `/student-visa` service still pays first, then uses the same 12-section form.
+
+**Admins**
+- **Main Admin** sees a non-sensitive summary on Applications and Application detail: visa status, had a visa,
+  visa application submitted, payment status, amount, reference, date, visa review, overall status. There are no
+  links to visa files, and no passport/ID numbers, form answers or M-PESA messages.
+- **Visa Admin** sees the full form, the declaration and every document on the visa request page.
+- Visa statuses: Not Required Yet, Visa Already Provided, Visa Assistance Required, Visa Form Submitted,
+  Awaiting Payment, Paid, Under Review, Completed.
+
+Tests: `tests/test_application_workflow.py`.

@@ -11,7 +11,7 @@ import pytest
 from werkzeug.security import generate_password_hash
 
 import app as app_module
-from conftest import get_application
+from conftest import complete_steps_before_visa, get_application, upload_visa_support_doc
 from database import get_db
 
 
@@ -439,6 +439,12 @@ def full_footprint(client, student):
     m["mpesa_code"] = q("SELECT mpesa_transaction_code FROM visa_payments WHERE student_id = ?", (sid,))[0][0]
     m["visa_file"] = os.path.basename(files["visa_file"])
     m["proof_file"] = os.path.basename(files["proof_file"])
+    # a real visa-assistance supporting document (secure upload route)
+    upload_visa_support_doc(client, req, "Passport-size Photograph")
+    m["support_file"] = q("""SELECT d.stored_file FROM visa_documents d WHERE d.request_id = ?
+                             AND d.stored_file IS NOT NULL""", (req,))[0][0]
+    files["support_file"] = os.path.join(app_module.VISA_APP_DOCS_DIR, m["support_file"])
+    assert os.path.exists(files["support_file"])
 
     execute("UPDATE students SET phone = ?, full_name = ? WHERE id = ?", (m["phone"], m["name"], sid))
     execute("""UPDATE funding_applications SET full_name = ?, phone = ?, personal_statement = ?, household_situation = ?,
@@ -529,6 +535,7 @@ def test_permanent_deletion_leaves_nothing_behind(client, student):
 
     # 2. stored files are gone
     assert not os.path.exists(f["visa_file"]) and not os.path.exists(f["proof_file"])
+    assert not os.path.exists(f["support_file"])
 
     # 3. the student cannot log in, and cannot re-use the old session
     login = app_module.app.test_client()
@@ -552,7 +559,7 @@ def test_permanent_deletion_leaves_nothing_behind(client, student):
     assert a["admin_user_id"] == admin_uid and a["target_label"].startswith(student["email"][0])
     d = json.loads(a["details"])
     assert d["removed"]["contact_messages"] == 1 and d["removed"]["scam_reports"] == 1
-    assert d["files"] == {"to_delete": 2, "removed": 2, "already_missing": 0, "failed": 0}
+    assert d["files"] == {"to_delete": 3, "removed": 3, "already_missing": 0, "failed": 0}
 
 
 def test_other_students_data_is_fully_untouched(client, student):
@@ -565,6 +572,7 @@ def test_other_students_data_is_fully_untouched(client, student):
     other_client.post("/application/step/personal", data={
         "full_name": "Keep Me", "date_of_birth": "2002-01-01", "country": "Kenya", "citizenship": "Kenyan",
         "phone": "0799999999", "email": other_email, "gender": "Female"})
+    complete_steps_before_visa(other_client)
     other_uid = q("SELECT id FROM users WHERE email = ?", (other_email,))[0][0]
     other = {"email": other_email, "student_id": q("SELECT id FROM students WHERE user_id = ?", (other_uid,))[0][0]}
     of = full_footprint(other_client, other)
@@ -633,7 +641,7 @@ def test_file_cleanup_failure_is_reported_and_audited(client, student, monkeypat
     assert footprint_counts(f, student["email"]) == {t: 0 for t in PER_STUDENT_TABLES}   # DB deletion stands
     assert not os.path.exists(f["visa_file"]) and os.path.exists(f["proof_file"])
     d = json.loads(q("SELECT details FROM admin_audit_log WHERE target_user_id = ?", (f["uid"],))[0][0])
-    assert d["files"]["failed"] == 1 and d["files"]["removed"] == 1
+    assert d["files"]["failed"] == 1 and d["files"]["removed"] == 2
     os.remove(f["proof_file"])
 
 
@@ -740,7 +748,7 @@ def test_storage_has_no_files_or_references_left(client, student):
     second = _second_student()
     other = full_footprint(second["_client"], second)
     _admin_delete(client, f, student["email"])
-    names = {os.path.basename(f["visa_file"]), os.path.basename(f["proof_file"])}
+    names = {os.path.basename(f["visa_file"]), os.path.basename(f["proof_file"]), os.path.basename(f["support_file"])}
     on_disk = {n for _, _, fs in os.walk(app_module.UPLOAD_ROOT) for n in fs}
     assert names & on_disk == set()
     path_cols = []
@@ -766,6 +774,7 @@ def _second_student():
     c.post("/application/step/personal", data={
         "full_name": "Second Student", "date_of_birth": "2001-02-03", "country": "Kenya", "citizenship": "Kenyan",
         "phone": "0788888888", "email": email, "gender": "Male"})
+    complete_steps_before_visa(c)
     uid = q("SELECT id FROM users WHERE email = ?", (email,))[0][0]
     return {"email": email, "student_id": q("SELECT id FROM students WHERE user_id = ?", (uid,))[0][0], "_client": c}
 

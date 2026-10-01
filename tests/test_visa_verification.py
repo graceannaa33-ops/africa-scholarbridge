@@ -14,8 +14,11 @@ from database import get_db
 def _assert_failed_to_assistance(client, student, r):
     assert r.status_code == 302, r.status_code
     loc = r.headers["Location"]
-    assert "/student-visa/" in loc and "payment" in loc, loc
-    page = client.get(loc).get_data(as_text=True)
+    # -> USA Student Visa Assistance: the visa application FORM comes
+    #    first (payment only after the form, documents and declaration)
+    assert "/student-visa/application/" in loc, loc
+    page = client.get(loc, follow_redirects=True).get_data(as_text=True)
+    assert "USA Student Visa Assistance" in page
     assert "We could not verify your U.S. visa" in page
     assert "uploaded successfully" not in page.lower()
     assert "verified successfully" not in page.lower()
@@ -26,8 +29,9 @@ def _assert_failed_to_assistance(client, student, r):
     assert row["visa_document_path"] is None
     assert len(visa_requests_for(row["id"])) == 1
     assert count_applications(student["student_id"]) == 1
-    nxt = client.get("/application/step/preferences")
+    nxt = client.post("/application/submit")                      # cannot submit without a passed visa step
     assert nxt.headers["Location"].endswith("/application/step/visa")
+    assert get_application(student["student_id"])["status"] == "Draft"
     return row
 
 
@@ -56,8 +60,8 @@ def test_valid_visa_is_verified_and_student_can_continue(client, student, fmt):
     assert visa_requests_for(row["id"]) == []                    # no assistance request
 
     r = client.post("/application/step/visa", data={"action": "continue"})
-    assert r.headers["Location"].endswith("/application/step/preferences")
-    assert client.get("/application/step/preferences").status_code == 200
+    assert r.headers["Location"].endswith("/application/submit")       # visa was the LAST step
+    assert client.get("/application/submit").status_code == 200
 
 
 def test_valid_visa_with_ten_char_passport_overflow(client, student):
@@ -191,20 +195,17 @@ def test_failures_never_duplicate_requests_or_applications(client, student):
     assert [r_["id"] for r_ in rows] == [request_id]
     assert count_applications(student["student_id"]) == 1
     assert get_application(student["student_id"])["visa_step_status"] != "COMPLETE"
-    assert client.get(f"/student-visa/payment/{request_id}").status_code == 200
+    # payment is not offered before the visa form is completed
+    r = client.get(f"/student-visa/payment/{request_id}")
+    assert r.status_code == 302 and f"/student-visa/application/{request_id}" in r.headers["Location"]
 
 
 # ---------------------------------------------------------------------
 # No bypassing
 # ---------------------------------------------------------------------
-LATER_STEPS = ["preferences", "statement", "documents", "bank", "review"]
-
-
 def _assert_blocked(client, student):
-    for step in LATER_STEPS:
-        assert client.get(f"/application/step/{step}").headers["Location"].endswith("/application/step/visa"), step
-        assert client.post(f"/application/step/{step}", data={"personal_statement": "x"}).headers[
-            "Location"].endswith("/application/step/visa"), step
+    """Visa Verification is the last step: nothing - 'continue', the
+    final submit - gets past it until the visa requirement has passed."""
     assert client.post("/application/step/visa", data={"action": "continue"}).headers[
         "Location"].endswith("/application/step/visa")
     assert client.post("/application/submit").headers["Location"].endswith("/application/step/visa")
@@ -244,7 +245,7 @@ def test_legacy_unverified_upload_is_no_longer_accepted(client, student):
                   WHERE student_id=?""", (student["student_id"],))
     db.commit()
     db.close()
-    assert client.get("/application/step/review").headers["Location"].endswith("/application/step/visa")
+    assert client.post("/application/submit").headers["Location"].endswith("/application/step/visa")
     row = get_application(student["student_id"])
     assert row["visa_step_status"] == "ACTION_REQUIRED"
     page = client.get("/application/step/visa").get_data(as_text=True)
@@ -302,8 +303,8 @@ def test_after_failure_existing_mpesa_verification_lets_student_continue(client,
     row = get_application(student["student_id"])
     assert row["visa_step_status"] == "COMPLETE" and row["visa_status"] == "NEEDS_ASSISTANCE"
     assert client.post("/application/step/visa", data={"action": "continue"}).headers[
-        "Location"].endswith("/application/step/preferences")
-    assert client.get("/application/step/preferences").status_code == 200
+        "Location"].endswith("/application/submit")
+    assert client.get("/application/submit").status_code == 200
 
 
 # ---------------------------------------------------------------------

@@ -10,8 +10,14 @@
       <div class="card asb-card shadow-sm">
         <div class="card-body p-3 p-md-5">
           <p class="text-uppercase small fw-semibold text-muted mb-1">Visa Application Payment</p>
-          <h2 class="fw-bold mb-1">Visa Application Assistance Fee</h2>
-          <p class="text-muted mb-4">Reference: <strong>{{ visa_request.request_number }}</strong></p>
+          <h2 class="fw-bold mb-1">Visa Assistance Service Fee</h2>
+          <p class="text-muted mb-2">Reference: <strong>{{ visa_request.request_number }}</strong></p>
+          {% if visa_request.form_first %}
+          <p class="small mb-4" id="formFirstSteps">
+            <span class="text-success">✓ Visa Form</span> &rarr; <span class="text-success">✓ Documents</span> &rarr;
+            <span class="text-success">✓ Declaration</span> &rarr; <strong>Payment</strong> &rarr; <span class="text-muted">Application Completed</span>
+          </p>
+          {% else %}<div class="mb-4"></div>{% endif %}
 
           {# ---------------- Payment status ---------------- #}
           {% if unlocked %}
@@ -24,7 +30,11 @@
             <div class="alert alert-warning" role="status">
               <h5 class="fw-bold mb-1">⏳ Payment Status: Pending Verification</h5>
               <p class="mb-1">Your payment details have been submitted and are awaiting verification.</p>
+              {% if visa_request.form_first %}
+              <p class="small mb-0">Once an Africa ScholarBridge administrator confirms the payment on the receiving M-PESA account, your application is completed automatically and you will see your application reference.</p>
+              {% else %}
               <p class="small mb-0">Your visa application stays locked until an Africa ScholarBridge administrator confirms the payment on the receiving M-PESA account.</p>
+              {% endif %}
             </div>
           {% elif status == 'PAYMENT_REJECTED' %}
             <div class="alert alert-danger" role="status">
@@ -38,7 +48,7 @@
           {# ---------------- 1. Fee + number ---------------- #}
           <section class="mb-4">
             <div class="border rounded p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-              <span class="fw-semibold">Visa Application Assistance Fee</span>
+              <span class="fw-semibold">Visa Assistance Service Fee</span>
               <strong class="fs-3">KSh {{ fee_display }}</strong>
             </div>
             <div class="border border-success rounded p-3 bg-light text-center">

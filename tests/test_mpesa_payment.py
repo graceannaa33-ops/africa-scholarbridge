@@ -10,6 +10,7 @@ from decimal import Decimal
 import pytest
 
 import app as app_module
+from conftest import complete_steps_before_visa, complete_visa_form
 import mpesa_parser as mp
 from database import get_db
 
@@ -227,8 +228,12 @@ def execute(sql, args=()):
 
 
 def visa_request_for(client, student):
+    """'No, I do not have a visa' at the final step, then the visa form,
+    documents and declaration - payment comes after that."""
     client.post("/application/step/visa", data={"visa_choice": "no"})
-    return q("SELECT id FROM visa_requests WHERE student_id = ?", (student["student_id"],))[0][0]
+    req = q("SELECT id FROM visa_requests WHERE student_id = ?", (student["student_id"],))[0][0]
+    complete_visa_form(client, req)
+    return req
 
 
 def submit(client, req, text, payer="0712345678"):
@@ -333,6 +338,7 @@ def test_duplicate_transaction_code_is_refused(client, student):
     other.post("/application/step/personal", data={
         "full_name": "Other Student", "date_of_birth": "2002-02-02", "country": "Kenya", "citizenship": "Kenyan",
         "phone": "0711111111", "email": email, "gender": "Male"})
+    complete_steps_before_visa(other)
     osid = q("SELECT s.id FROM students s JOIN users u ON u.id = s.user_id WHERE u.email = ?", (email,))[0][0]
     other_req = visa_request_for(other, {"student_id": osid})
     for variant in (sms(code=code), sms(code=code).lower(), sms(code=code, time="4:24 PM", amount="Ksh1,500.00")):

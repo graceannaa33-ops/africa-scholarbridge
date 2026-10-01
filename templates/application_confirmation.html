@@ -7,16 +7,32 @@
       <div class="card asb-card shadow-sm border-success">
         <div class="card-body p-5">
           <i class="bi bi-check-circle-fill display-3 text-success"></i>
-          <h3 class="fw-bold mt-3">✅ Application Submitted Successfully</h3>
+          {% set assisted = visa_request is not none and application.visa_status == 'NEEDS_ASSISTANCE' %}
+          <h3 class="fw-bold mt-3">✅ Application Completed Successfully</h3>
+          {% if assisted %}
+          <p class="text-muted">Your Africa ScholarBridge application and visa assistance submission have been received successfully.</p>
+          {% else %}
           <p class="text-muted">Your Africa ScholarBridge annual funding application has been successfully submitted.</p>
+          {% endif %}
 
-          <table class="table table-sm text-start mt-4">
+          <table class="table table-sm text-start mt-4" id="confirmationDetails">
             <tr><th>Application Reference</th><td class="fw-bold text-primary">{{ application.reference_number }}</td></tr>
+            <tr><th>Application Status</th><td><span class="badge bg-success">Submitted</span>
+              {% if application.status != 'Submitted' %}<span class="small text-muted ms-1">({{ application.status }})</span>{% endif %}</td></tr>
             <tr><th>Submission Date</th>
               <td>{{ application.submitted_at[:10] if application.submitted_at else '—' }}</td></tr>
             <tr><th>Application Cycle</th><td>{{ cycle.name if cycle else '—' }}</td></tr>
-            <tr><th>Status</th><td><span class="badge asb-badge-type">{{ application.status }}</span></td></tr>
+            <tr><th>Visa</th><td>
+              {% if application.visa_status == 'HAS_VISA' %}Visa already provided (verified)
+              {% elif assisted %}Visa assistance — {{ 'Paid' if visa_request.payment_verified else 'Payment pending' }}{% if visa_request.request_number %} · {{ visa_request.request_number }}{% endif %}
+              {% else %}—{% endif %}</td></tr>
           </table>
+          <p class="small text-muted">We will review the information and documents provided.</p>
+          {% if assisted %}
+          <div class="alert alert-info small text-start" id="noGuarantee">
+            <strong>Important:</strong> Payment does not guarantee visa approval. Africa ScholarBridge provides assistance and guidance only.
+          </div>
+          {% endif %}
 
           {% if application.confirmation_email_status == 'SENT' %}
             <div class="alert alert-success small mb-0">

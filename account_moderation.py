@@ -27,7 +27,8 @@ infrastructure backups, snapshots, previously sent emails, or external
 systems, and it does not guarantee forensic destruction on the physical
 storage device (see docs/ACCOUNT_DELETION.md).
 
-Stored files (verified visa documents, M-PESA screenshots) are deleted only
+Stored files (verified visa documents, M-PESA screenshots, visa assistance
+supporting documents) are deleted only
 AFTER the commit. If that fails, the database deletion stands, the failure
 is recorded in the audit row, and the admin is told.
 
@@ -170,6 +171,10 @@ def _stored_files(db, student_id):
             "(student_id = ? OR request_id IN (SELECT id FROM visa_requests WHERE student_id = ?))",
             (student_id, student_id)):
         files.append(("payment_proofs", name))
+    for (name,) in db.execute(
+            "SELECT d.stored_file FROM visa_documents d JOIN visa_requests v ON v.id = d.request_id "
+            "WHERE v.student_id = ? AND d.stored_file IS NOT NULL", (student_id,)):
+        files.append(("visa_application_documents", name))
     return files
 
 
