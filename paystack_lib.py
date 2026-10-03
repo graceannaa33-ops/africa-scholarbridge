@@ -20,6 +20,7 @@ raw body using the secret key).
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -27,6 +28,9 @@ import urllib.error
 import urllib.request
 
 API_BASE = "https://api.paystack.co"
+# Child of Flask's "app" logger (app = Flask(__name__) in app.py), so these
+# lines reach the same output (Render logs) in the same format.
+log = logging.getLogger("app.paystack")
 TIMEOUT_SECONDS = 20
 CURRENCY = "KES"
 
@@ -103,8 +107,84 @@ def valid_signature(raw_body, signature):
     return hmac.compare_digest(expected, signature.strip().lower())
 
 
+def mask_phone(phone):
+    """'+254712345678' -> '+2547******78' (for logs)."""
+    phone = str(phone or "")
+    return phone[:5] + "*" * max(len(phone) - 7, 0) + phone[-2:] if len(phone) > 7 else "***"
+
+
+# Fields of Paystack's `data` object that are safe to keep and log: they
+# describe the charge, never the customer's credentials (no PIN/OTP/card).
+_SAFE_DATA_FIELDS = ("status", "message", "gateway_response", "reference", "display_text")
+
+
+def _safe_data(data):
+    if not isinstance(data, dict):
+        return {}
+    return {k: str(data[k])[:200] for k in _SAFE_DATA_FIELDS if data.get(k) not in (None, "")}
+
+
 class PaystackError(Exception):
-    """Network/API failure. The message is safe to log (no key)."""
+    """Network/API failure. Carries Paystack's own answer (safe fields
+    only) so the real reason can be logged and shown. Never holds the key."""
+
+    def __init__(self, message, http_status=None, api_status=None, api_message=None, data=None,
+                 code=None, error_type=None, next_step=None):
+        super().__init__(message)
+        self.http_status, self.api_status, self.api_message = http_status, api_status, api_message
+        self.data = _safe_data(data)
+        self.code, self.error_type, self.next_step = code, error_type, next_step
+
+    @property
+    def charge_attempted(self):
+        """Paystack created/attempted a transaction for this reference
+        (it returned the charge's own status or reference), so its final
+        state must be read with verify() - not assumed."""
+        return bool(self.data.get("status") or self.data.get("reference"))
+
+    @property
+    def reason(self):
+        """Paystack's most specific explanation, safe to show the student."""
+        return (self.data.get("message") or self.data.get("gateway_response") or self.api_message or "")[:200]
+
+    def diagnostics(self):
+        """One log line with every safe field Paystack returned."""
+        parts = [f"http={self.http_status}", f"status={self.api_status}", f"message={self.api_message!r}"]
+        parts += [f"{k}={v!r}" for k, v in (("type", self.error_type), ("code", self.code),
+                                            ("next_step", self.next_step)) if v]
+        parts += [f"data.{k}={v!r}" for k, v in self.data.items()]
+        return _mask_in_text(" ".join(parts))          # no full phone number, even inside messages
+
+
+_PHONE_LIKE = re.compile(r"(?<![\w\-+])\+?\d[\d ]{7,14}\d(?![\w\-])")   # standalone numbers only
+
+
+def _mask_in_text(value):
+    """Masks anything that looks like a phone number inside a logged string."""
+    return _PHONE_LIKE.sub(lambda m: mask_phone(re.sub(r"[^\d+]", "", m.group())), str(value))
+
+
+def log_http_error_diagnostics(err):
+    """TEMPORARY diagnostic line for Paystack HTTP errors (e.g. HTTP 400 on
+    /charge). Logs only Paystack's answer - never the key, the
+    Authorization header, PIN/OTP or a full phone number."""
+    d = err.data
+    fields = (("http", err.http_status), ("status", err.api_status), ("message", err.api_message),
+              ("data_status", d.get("status")), ("data_message", d.get("message")),
+              ("gateway_response", d.get("gateway_response")), ("reference", d.get("reference")))
+    log.warning("Paystack HTTP error diagnostics: %s",
+                " ".join(f"{k}={_mask_in_text(v)!r}" if isinstance(v, str) else f"{k}={v!r}" for k, v in fields))
+
+
+def _error_from_payload(prefix, http_status, payload):
+    payload = payload if isinstance(payload, dict) else {}
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    api_message = str(payload.get("message") or "")[:200]
+    return PaystackError(f"{prefix}: {api_message}", http_status=http_status, api_status=payload.get("status"),
+                         api_message=api_message, data=payload.get("data"),
+                         code=str(payload.get("code") or "")[:80] or None,
+                         error_type=str(payload.get("type") or "")[:80] or None,
+                         next_step=str(meta.get("nextStep") or "")[:200] or None)
 
 
 def _call(method, path, body=None):
@@ -123,11 +203,16 @@ def _call(method, path, body=None):
             payload = json.loads(exc.read().decode("utf-8") or "{}")
         except ValueError:
             payload = {}
-        raise PaystackError(f"Paystack HTTP {exc.code}: {str(payload.get('message') or '')[:200]}") from None
+        # Keep Paystack's whole (safe) answer: for a charge, the real reason
+        # is in data.status / data.message / data.gateway_response, while the
+        # top-level message is often just "Charge attempted".
+        err = _error_from_payload(f"Paystack HTTP {exc.code}", exc.code, payload)
+        log_http_error_diagnostics(err)
+        raise err from None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         raise PaystackError(f"Could not reach Paystack ({type(exc).__name__}).") from None
-    if not isinstance(payload, dict) or not payload.get("status"):
-        raise PaystackError(f"Paystack refused the request: {str((payload or {}).get('message') or '')[:200]}")
+    if not isinstance(payload, dict) or payload.get("status") is not True:
+        raise _error_from_payload("Paystack refused the request", 200, payload)
     return payload.get("data") or {}
 
 
@@ -146,12 +231,17 @@ def initialize_checkout(email, amount_subunit, reference, callback_url, metadata
 
 def charge_mpesa(email, amount_subunit, reference, phone_e164, metadata=None):
     """Kenya M-PESA via the Charge API: Paystack sends an M-PESA prompt to
-    the phone. Returns (paystack_status, display_text)."""
+    the phone. A started charge comes back as status true, "Charge
+    attempted", data.status "pay_offline" - that only means the prompt was
+    SENT; it is never proof of payment.
+    Returns {"status", "display_text", "reference"} from Paystack's data."""
     data = _call("POST", "/charge", {
         "email": email, "amount": str(int(amount_subunit)), "currency": CURRENCY, "reference": reference,
         "mobile_money": {"phone": phone_e164, "provider": "mpesa"}, "metadata": metadata or {},
     })
-    return str(data.get("status") or ""), str(data.get("display_text") or data.get("message") or "")
+    return {"status": str(data.get("status") or ""),
+            "display_text": str(data.get("display_text") or data.get("message") or "")[:300],
+            "reference": str(data.get("reference") or "")[:100]}
 
 
 def verify(reference):

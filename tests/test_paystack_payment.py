@@ -43,6 +43,10 @@ class FakePaystack:
 
     def __init__(self):
         self.calls, self.outcome, self.fail_next = [], {}, False
+        self.charge_reply = None          # dict -> returned as /charge data
+        self.charge_error = None          # PaystackError -> raised by /charge
+        self.verify_unavailable = False
+        self.default_outcome = {"status": "ongoing"}     # verify result for references without an outcome
 
     def __call__(self, method, path, body=None):
         self.calls.append((method, path, body))
@@ -50,15 +54,22 @@ class FakePaystack:
             self.fail_next = False
             raise paystack_lib.PaystackError("Could not reach Paystack (URLError).")
         if path == "/charge":
+            if self.charge_error is not None:
+                raise self.charge_error
+            if self.charge_reply is not None:
+                return self.charge_reply
             return {"status": "pay_offline", "display_text": "Please complete authorization on your phone",
                     "reference": body["reference"]}
+        if path.startswith("/transaction/verify/") and self.verify_unavailable:
+            raise paystack_lib.PaystackError("Could not reach Paystack (URLError).")
         if path == "/transaction/initialize":
             return {"authorization_url": f"https://checkout.paystack.com/{body['reference'][-8:].lower()}",
                     "access_code": "ac", "reference": body["reference"]}
         if path.startswith("/transaction/verify/"):
             ref = path.rsplit("/", 1)[1]
-            o = self.outcome.get(ref, {"status": "ongoing"})
-            return {"reference": ref, "amount": o.get("amount", 150000), "currency": o.get("currency", "KES"),
+            o = self.outcome.get(ref, self.default_outcome)
+            return {"reference": o.get("reference", ref), "amount": o.get("amount", 150000),
+                    "currency": o.get("currency", "KES"),
                     "status": o["status"], "channel": "mobile_money", "paid_at": "2026-10-03T08:00:00.000Z",
                     "gateway_response": o.get("gateway_response", "Approved")}
         raise AssertionError(path)
@@ -482,8 +493,16 @@ def test_http_client_sends_bearer_key_and_parses_responses(monkeypatch):
         def do_POST(self):
             seen["auth"] = self.headers.get("Authorization")
             seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            if self.path == "/charge":
-                self._reply(200, {"status": True, "data": {"status": "pay_offline", "display_text": "Enter PIN"}})
+            if self.path == "/charge" and seen["body"]["reference"].startswith("BAD"):
+                # A charge Paystack attempted but could not start: HTTP 400 whose
+                # real reason is inside `data`, not the top-level message.
+                self._reply(400, {"status": False, "message": "Charge attempted",
+                                  "data": {"status": "failed", "message": "Invalid phone number",
+                                           "reference": seen["body"]["reference"]}})
+            elif self.path == "/charge":
+                self._reply(200, {"status": True, "message": "Charge attempted",
+                                  "data": {"status": "pay_offline", "display_text": "Enter PIN",
+                                           "reference": seen["body"]["reference"]}})
             else:
                 self._reply(400, {"status": False, "message": "Invalid amount"})
 
@@ -501,9 +520,18 @@ def test_http_client_sends_bearer_key_and_parses_responses(monkeypatch):
     for k in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
         monkeypatch.delenv(k, raising=False)
     try:
-        status, text = paystack_lib.charge_mpesa("a@b.co", 150000, "ASB-VISA-1-ABC", "+254712345678", {"x": 1})
-        assert (status, text) == ("pay_offline", "Enter PIN")
+        result = paystack_lib.charge_mpesa("a@b.co", 150000, "ASB-VISA-1-ABC", "+254712345678", {"x": 1})
+        assert result == {"status": "pay_offline", "display_text": "Enter PIN", "reference": "ASB-VISA-1-ABC"}
         assert seen["auth"] == f"Bearer {SECRET}"
+        assert seen["body"]["reference"] == "ASB-VISA-1-ABC" and seen["body"]["email"] == "a@b.co"
+        with pytest.raises(paystack_lib.PaystackError) as e:
+            paystack_lib.charge_mpesa("a@b.co", 150000, "BAD-1", "+254712345678")
+        err = e.value
+        assert err.http_status == 400 and err.api_status is False and err.api_message == "Charge attempted"
+        assert err.charge_attempted and err.reason == "Invalid phone number"
+        diag = err.diagnostics()
+        assert "http=400" in diag and "data.status='failed'" in diag and "Invalid phone number" in diag
+        assert SECRET not in diag and SECRET not in str(err) and "712345678" not in diag
         assert seen["body"]["mobile_money"] == {"phone": "+254712345678", "provider": "mpesa"}
         assert seen["body"]["amount"] == "150000" and seen["body"]["currency"] == "KES"
         assert paystack_lib.verify("ASB-VISA-1-ABC")["status"] == "success"
@@ -540,3 +568,260 @@ def test_two_simultaneous_confirmations_unlock_once(client, student, paystack):
     assert q("SELECT COUNT(*) FROM visa_admin_notifications WHERE request_id = ? AND message LIKE '%Duplicate%'",
              (rid,))[0][0] == 0
     assert q("SELECT admin_notes FROM visa_payments WHERE id = ?", (stale["id"],))[0][0] is None
+
+
+# ---------------------------------------------------------------------
+# "Charge attempted" handling (Paystack Kenya M-PESA, /charge)
+# ---------------------------------------------------------------------
+DOCS_PAY_OFFLINE = {"reference": "test-paystack-reference", "status": "pay_offline",
+                    "display_text": "Please complete authorization process on your mobile phone"}
+
+
+def _verified_rows(rid):
+    return q("SELECT COUNT(*) FROM visa_payments WHERE request_id = ? AND payment_status = 'PAYMENT_VERIFIED'",
+             (rid,))[0][0]
+
+
+def test_A_charge_attempted_pay_offline_is_pending_not_a_failure(client, student, paystack):
+    rid = ready_to_pay(client, student)
+    paystack.charge_reply = dict(DOCS_PAY_OFFLINE)
+    r = start(client, rid, phone="0710000000")
+    msg = flashes(client)
+    assert "couldn't start" not in msg and "Nothing was charged" not in msg
+    assert "Payment request sent" in msg and "Please complete authorization process on your mobile phone" in msg
+    [a] = attempts(rid)
+    assert a["paystack_reference"] == "test-paystack-reference"            # Paystack's reference stored
+    assert a["gateway_status"] == "pending" and a["payment_status"] == "PAYMENT_PENDING"
+    assert a["gateway_message"] == DOCS_PAY_OFFLINE["display_text"]
+    assert not unlocked(rid) and _verified_rows(rid) == 0                  # NOT verified by the charge reply
+    assert paystack.bodies("/transaction/verify/test-paystack-reference") == []
+    page = client.get(r.headers["Location"]).get_data(as_text=True)
+    assert 'id="paymentPending"' in page and "waiting for M-PESA authorization" in page
+    # The request Paystack received
+    [body] = paystack.bodies("/charge")
+    assert body["amount"] == "150000" and body["currency"] == "KES" and body["email"] == "amina@example.com"
+    assert body["mobile_money"] == {"phone": "+254710000000", "provider": "mpesa"}
+
+
+def test_B_C_success_webhook_verifies_once_even_if_sent_twice(client, student, paystack):
+    rid = ready_to_pay(client, student)
+    ref = f"test-paystack-reference-{secrets.token_hex(4)}"
+    paystack.charge_reply = dict(DOCS_PAY_OFFLINE, reference=ref)
+    start(client, rid)
+    assert attempts(rid)[0]["paystack_reference"] == ref
+    paystack.outcome[ref] = {"status": "success"}
+    event = {"event": "charge.success", "data": {"reference": ref, "status": "success", "amount": 150000}}
+    assert signed_webhook(client, event).status_code == 200
+    assert len(paystack.bodies(f"/transaction/verify/{ref}")) == 1           # re-verified with Paystack
+    assert unlocked(rid) and _verified_rows(rid) == 1
+    a = attempts(rid)[0]
+    assert a["paid_amount_subunit"] == 150000 and a["paid_currency"] == "KES" and a["verified"] == 1
+    notes = lambda: q("SELECT COUNT(*) FROM visa_admin_notifications WHERE request_id = ? AND message LIKE ?",  # noqa: E731
+                      (rid, "%New Visa Assistance Case%"))[0][0]
+    before = notes()
+    assert signed_webhook(client, event).status_code == 200                 # duplicate delivery
+    assert unlocked(rid) and _verified_rows(rid) == 1 and notes() == before
+    assert len(paystack.bodies(f"/transaction/verify/{ref}")) == 1           # already credited: no re-processing
+    assert len(attempts(rid)) == 1
+
+
+def test_D_paystack_refusal_is_friendly_logged_and_never_verified(client, student, paystack, caplog):
+    rid = ready_to_pay(client, student)
+    paystack.charge_error = paystack_lib._error_from_payload(
+        "Paystack HTTP 400", 400, {"status": False, "message": "Some real Paystack error"})
+    with caplog.at_level("WARNING"):
+        start(client, rid, phone="0712345678")
+    msg = flashes(client)
+    assert "couldn't start the payment" in msg and "Some real Paystack error" in msg
+    [a] = attempts(rid)
+    assert a["gateway_status"] == "failed" and not unlocked(rid) and _verified_rows(rid) == 0
+    log = caplog.text
+    assert "http=400" in log and "Some real Paystack error" in log and a["paystack_reference"] in log
+    assert "0712345678" not in log and "+254712345678" not in log and SECRET not in log   # phone masked, no key
+
+
+def _charge_attempted_400(data_status="failed", message="Test mobile money only works with the test number"):
+    return paystack_lib._error_from_payload("Paystack HTTP 400", 400, {
+        "status": False, "message": "Charge attempted", "data": {"status": data_status, "message": message}})
+
+
+def test_D2_http_400_charge_attempted_is_checked_with_verify_not_assumed(client, student, paystack, caplog):
+    """The production symptom: HTTP 400 'Charge attempted'. The real reason is
+    in data; Paystack is then asked (verify) for the reference's real state.
+    Here verify says Paystack is still processing -> stays pending."""
+    rid = ready_to_pay(client, student)
+    paystack.charge_error = _charge_attempted_400()
+    with caplog.at_level("WARNING"):
+        start(client, rid)
+    [a] = attempts(rid)
+    assert len(paystack.bodies(f"/transaction/verify/{a['paystack_reference']}")) == 1
+    assert a["gateway_status"] == "pending" and not unlocked(rid) and _verified_rows(rid) == 0
+    assert "Charge attempted" in caplog.text and "Test mobile money only works with the test number" in caplog.text
+    assert "Nothing was charged" not in flashes(client)
+
+
+def test_D2b_http_400_charge_attempted_confirmed_failed_shows_paystack_reason(client, student, paystack):
+    rid = ready_to_pay(client, student)
+    paystack.charge_error = _charge_attempted_400()
+    paystack.default_outcome = {"status": "failed", "gateway_response": ""}
+    start(client, rid)
+    [a] = attempts(rid)
+    assert a["gateway_status"] == "failed" and not unlocked(rid) and _verified_rows(rid) == 0
+    assert a["gateway_message"] == "Test mobile money only works with the test number"
+    msg = flashes(client)
+    assert "Test mobile money only works with the test number" in msg and "couldn't start" not in msg
+    page = client.get(f"/student-visa/application/{rid}/step/documents").get_data(as_text=True)
+    assert 'id="paymentNotCompleted"' in page and "Test mobile money only works with the test number" in page
+    start(client, rid)                                                      # retry still possible
+    assert len(attempts(rid)) == 2
+
+
+def test_D3_charge_attempted_when_verify_is_unreachable_never_success(client, student, paystack):
+    """Verify unreachable: an HTTP 400 is a genuine failure whatever data.status
+    says; a non-HTTP-error refusal may stay pending; nothing is ever paid."""
+    rid = ready_to_pay(client, student)
+    paystack.verify_unavailable = True
+    for data_status in ("failed", "pay_offline", "success"):
+        paystack.charge_error = _charge_attempted_400(data_status, f"m-{data_status}")
+        start(client, rid)
+        a = attempts(rid)[-1]
+        assert a["gateway_status"] == "failed" and a["gateway_message"] == f"m-{data_status}", data_status
+        assert not unlocked(rid)
+    for data_status, expected in (("pay_offline", "pending"), ("success", "pending"), ("failed", "failed")):
+        paystack.charge_error = paystack_lib._error_from_payload("Paystack refused the request", 200, {
+            "status": False, "message": "Charge attempted", "data": {"status": data_status}})
+        start(client, rid)
+        assert attempts(rid)[-1]["gateway_status"] == expected, data_status
+        assert not unlocked(rid)
+
+
+def test_E_kenyan_phone_normalisation_and_friendly_rejection(client, student, paystack):
+    n = paystack_lib.normalize_kenyan_phone
+    for raw in ("0712345678", "254712345678", "+254712345678"):
+        assert n(raw) == "+254712345678"
+    assert n("0112345678") == "+254112345678"
+    rid = ready_to_pay(client, student)
+    start(client, rid, phone="07123")
+    assert "valid Kenyan M-PESA number" in flashes(client) and attempts(rid) == []
+    assert paystack_lib.mask_phone("+254712345678") == "+2547******78"
+
+
+@pytest.mark.parametrize("outcome", [{"status": "success", "amount": 15000},
+                                     {"status": "success", "currency": "NGN"},
+                                     {"status": "success", "reference": "ASB-VISA-999-OTHERPAYMENT00"}],
+                         ids=["F-amount", "G-currency", "H-reference"])
+def test_F_G_H_successful_looking_mismatches_never_verify(client, student, paystack, outcome):
+    rid = ready_to_pay(client, student)
+    start(client, rid)
+    ref = attempts(rid)[0]["paystack_reference"]
+    paystack.outcome[ref] = outcome
+    client.post(f"/student-visa/payment/{rid}/paystack/check")
+    assert not unlocked(rid) and _verified_rows(rid) == 0
+    assert attempts(rid)[0]["gateway_status"] != "successful"
+
+
+@pytest.mark.parametrize("still", ["pay_offline", "pending", "ongoing"])
+def test_I_requery_while_waiting_for_authorization_stays_pending(client, student, paystack, still):
+    rid = ready_to_pay(client, student)
+    start(client, rid)
+    ref = attempts(rid)[0]["paystack_reference"]
+    paystack.outcome[ref] = {"status": still}
+    client.post(f"/student-visa/payment/{rid}/paystack/check")
+    assert attempts(rid)[0]["gateway_status"] == "pending" and not unlocked(rid)
+    assert paystack.bodies(f"/transaction/verify/{ref}")                    # asked Paystack with OUR reference
+    assert "still being processed" in flashes(client)
+
+
+def test_failed_webhook_event_is_reverified_and_never_unlocks(client, student, paystack):
+    rid = ready_to_pay(client, student)
+    start(client, rid)
+    ref = attempts(rid)[0]["paystack_reference"]
+    paystack.outcome[ref] = {"status": "failed", "gateway_response": "Insufficient funds"}
+    assert signed_webhook(client, {"event": "charge.failed", "data": {"reference": ref}}).status_code == 200
+    a = attempts(rid)[0]
+    assert a["gateway_status"] == "failed" and a["gateway_message"] == "Insufficient funds" and not unlocked(rid)
+
+
+def test_returned_reference_already_used_elsewhere_is_never_attached(client, student, paystack):
+    rid = ready_to_pay(client, student)
+    start(client, rid)
+    first = attempts(rid)[0]["paystack_reference"]
+    paystack.charge_reply = dict(DOCS_PAY_OFFLINE, reference=first)          # Paystack echoes an existing reference
+    r = start(client, rid)
+    assert r.status_code == 302
+    second = attempts(rid)[1]
+    assert second["paystack_reference"] != first and second["gateway_status"] == "pending" and not unlocked(rid)
+
+
+def test_regression_http_400_charge_attempted_end_to_end_preserves_diagnostics(client, student, monkeypatch, caplog):
+    """Reproduces the Render symptom through the REAL HTTP client and the
+    real start route: /charge answers HTTP 400 {status:false, "Charge
+    attempted", data:{...}}. The data must be kept, logged safely, shown to
+    the student, and the attempt must fail (never pending/paid)."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def _reply(self, code, payload):
+            body = json.dumps(payload).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self):
+            seen["path"], seen["auth"] = self.path, self.headers.get("Authorization")
+            seen["content_type"] = self.headers.get("Content-Type")
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            self._reply(400, {"status": False, "message": "Charge attempted",
+                              "data": {"status": "failed",
+                                       "message": "Charge could not be completed for +254712345678",
+                                       "gateway_response": "Declined",
+                                       "reference": seen["body"]["reference"]}})
+
+        def do_GET(self):
+            self._reply(404, {"status": False, "message": "Transaction reference not found"})
+
+        def log_message(self, *a):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(paystack_lib, "API_BASE", f"http://127.0.0.1:{server.server_port}")
+    monkeypatch.setenv("PAYSTACK_SECRET_KEY", SECRET)
+    monkeypatch.setenv("PAYSTACK_PUBLIC_KEY", PUBLIC)
+    for k in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+        monkeypatch.delenv(k, raising=False)
+    try:
+        rid = ready_to_pay(client, student)
+        with caplog.at_level("WARNING"):
+            start(client, rid, phone="0712345678")
+    finally:
+        server.shutdown()
+    [a] = attempts(rid)
+    ref = a["paystack_reference"]
+    # Exact request sent
+    assert seen["path"] == "/charge" and seen["auth"] == f"Bearer {SECRET}"
+    assert seen["content_type"] == "application/json"
+    vr = request_of(student)
+    assert seen["body"] == {"email": "amina@example.com", "amount": "150000", "currency": "KES", "reference": ref,
+                            "mobile_money": {"phone": "+254712345678", "provider": "mpesa"},
+                            "metadata": {"visa_request_id": rid, "request_number": vr["request_number"],
+                                         "purpose": "visa_assistance_fee"}}
+    # Diagnostics preserved and logged (safe fields only)
+    diag = [r.getMessage() for r in caplog.records if "Paystack HTTP error diagnostics" in r.getMessage()]
+    charge_line = next(line for line in diag if "Charge attempted" in line)
+    for want in ("http=400", "status=False", "message='Charge attempted'", "data_status='failed'",
+                 "gateway_response='Declined'", f"reference='{ref}'", "data_message='Charge could not be completed"):
+        assert want in charge_line, want
+    assert any("message='Transaction reference not found'" in line and "http=404" in line for line in diag)
+    log = caplog.text
+    assert SECRET not in log and "Bearer" not in log
+    assert "712345678" not in log and "+2547******78" in log                 # phone masked even inside messages
+    # Genuine failure: never pending, never paid; the reason is kept and shown
+    assert a["gateway_status"] == "failed" and a["payment_status"] == "PAYMENT_REJECTED" and not unlocked(rid)
+    assert a["gateway_message"] == "Charge could not be completed for +254712345678"
+    msg = flashes(client)
+    assert "Charge could not be completed" in msg and "Nothing was charged" not in msg

@@ -2696,27 +2696,115 @@ def student_visa_paystack_start(request_id):
                 "purpose": "visa_assistance_fee"}
     try:
         if phone:
-            ps_status, text = paystack_lib.charge_mpesa(email, amount_subunit, reference, phone, metadata)
-            db.execute("UPDATE visa_payments SET gateway_message=? WHERE id=?", (text[:300] or None, payment["id"]))
+            result = paystack_lib.charge_mpesa(email, amount_subunit, reference, phone, metadata)
+            payment = _paystack_store_returned_reference(db, payment, result["reference"])
+            db.execute("UPDATE visa_payments SET gateway_message=? WHERE id=?",
+                       (result["display_text"] or None, payment["id"]))
             db.commit()
-            if paystack_lib.gateway_status(ps_status) in ("successful", "failed"):
+            app.logger.info("Paystack M-PESA charge started: request=%s ref=%s phone=%s data.status=%s",
+                            request_id, payment["paystack_reference"], paystack_lib.mask_phone(phone),
+                            result["status"])
+            if paystack_lib.gateway_status(result["status"]) in ("successful", "failed"):
+                # Never trust the charge response itself - ask Paystack (verify).
                 _paystack_verify_attempt(db, payment)
-            else:
-                flash("📱 Check your phone: an M-PESA prompt for KSh {:,.0f} has been sent. Enter your M-PESA PIN "
-                      "on your phone to pay, then click “Check payment status”.".format(fee), "info")
+                return _paystack_attempt_outcome(db, payment["id"], back)
+            # "Charge attempted" + pay_offline (or any in-progress status): the
+            # prompt was SENT. The attempt stays pending until Paystack's
+            # webhook or a verify confirms the final result.
+            flash("📱 Payment request sent. {} Check your phone and complete the M-PESA authorization for "
+                  "KSh {:,.0f}. Your payment will be confirmed automatically once Paystack reports it as "
+                  "successful - or click “Check payment status”.".format(
+                      (result["display_text"] or "Please complete the authorization on your phone.").rstrip(".") + ".",
+                      fee), "info")
             return back
         checkout_url = paystack_lib.initialize_checkout(
             email, amount_subunit, reference, url_for("paystack_callback", _external=True), metadata)
         return redirect(checkout_url)
     except paystack_lib.PaystackError as exc:
-        app.logger.warning("Paystack start failed for request %s: %s", request_id, exc)
-        db.execute("""UPDATE visa_payments SET gateway_status='failed', payment_status='PAYMENT_REJECTED',
-                      status='failed', rejection_reason='Payment could not be started with Paystack.',
-                      updated_at=CURRENT_TIMESTAMP WHERE id=? AND gateway_status='pending'""", (payment["id"],))
-        db.commit()
-        flash("We couldn't start the payment with Paystack right now. Nothing was charged - please try again "
-              "in a moment.", "danger")
+        app.logger.warning("Paystack start failed: request=%s ref=%s method=%s phone=%s %s", request_id,
+                           reference, "mpesa" if phone else "checkout",
+                           paystack_lib.mask_phone(phone) if phone else "-", exc.diagnostics())
+        if exc.charge_attempted:
+            # Paystack DID attempt a charge on this reference (e.g. HTTP 400
+            # "Charge attempted" with data.status "failed"): its real state
+            # comes from verify, never from the HTTP code alone.
+            if _paystack_verify_attempt(db, payment) is None:
+                # Verify unavailable. An HTTP 4xx means Paystack did not
+                # fulfil the request: a genuine failure, whatever its body
+                # says. (A later real success still arrives via the webhook,
+                # which re-verifies.) Otherwise the charge's own status can
+                # only keep it pending or fail it - never mark it paid.
+                state = paystack_lib.gateway_status(exc.data.get("status"))
+                if ((exc.http_status or 0) < 400 and state in ("pending", "successful")
+                        and exc.data.get("status")):
+                    db.execute("UPDATE visa_payments SET gateway_message=? WHERE id=? AND gateway_status='pending'",
+                               (exc.reason or None, payment["id"]))
+                    db.commit()
+                else:
+                    _paystack_mark_start_failed(db, payment["id"], exc.reason)
+            _paystack_fill_failure_reason(db, payment["id"], exc.reason)
+            return _paystack_attempt_outcome(db, payment["id"], back)
+        _paystack_mark_start_failed(db, payment["id"], exc.reason)
+        shown = exc.reason if exc.http_status in (400, 422) and exc.reason else ""
+        flash("We couldn't start the payment with Paystack right now{}. Nothing was charged - please try again "
+              "in a moment.".format(f" (Paystack: {shown})" if shown else ""), "danger")
         return back
+
+
+def _paystack_store_returned_reference(db, payment, returned):
+    """Paystack echoes the reference we send. If it ever returns a different
+    (valid) one, that is the transaction to verify - keep it on this attempt."""
+    if returned and returned != payment["paystack_reference"]:
+        taken = db.execute("SELECT 1 FROM visa_payments WHERE paystack_reference=? AND id != ?",
+                           (returned, payment["id"])).fetchone()
+        if taken or not re.fullmatch(r"[A-Za-z0-9.=\-]{1,100}", returned):
+            # Never attach one Paystack transaction to two attempts.
+            app.logger.error("Paystack returned reference %r for our %s that cannot be stored (%s); keeping ours.",
+                             returned[:100], payment["paystack_reference"], "already used" if taken else "invalid")
+        else:
+            app.logger.warning("Paystack returned reference %s for our %s; storing Paystack's.",
+                               returned, payment["paystack_reference"])
+            db.execute("UPDATE visa_payments SET paystack_reference=? WHERE id=? AND gateway_status='pending'",
+                       (returned, payment["id"]))
+            db.commit()
+        return db.execute("SELECT * FROM visa_payments WHERE id=?", (payment["id"],)).fetchone()
+    return payment
+
+
+def _paystack_mark_start_failed(db, payment_id, reason):
+    db.execute("""UPDATE visa_payments SET gateway_status='failed', payment_status='PAYMENT_REJECTED',
+                  status='failed', gateway_message=COALESCE(?, gateway_message),
+                  rejection_reason=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND gateway_status='pending'""",
+               (reason or None, f"Paystack: {reason}" if reason else "Payment could not be started with Paystack.",
+                payment_id))
+    db.commit()
+
+
+def _paystack_fill_failure_reason(db, payment_id, reason):
+    """Keeps Paystack's charge-time reason when verify gave none."""
+    if reason:
+        db.execute("""UPDATE visa_payments SET gateway_message=? WHERE id=? AND gateway_status IN
+                      ('failed','abandoned','cancelled') AND (gateway_message IS NULL OR gateway_message='')""",
+                   (reason, payment_id))
+        db.commit()
+
+
+def _paystack_attempt_outcome(db, payment_id, back):
+    """Tells the student the VERIFIED state of one attempt."""
+    payment = db.execute("SELECT * FROM visa_payments WHERE id=?", (payment_id,)).fetchone()
+    visa_request = db.execute("SELECT * FROM visa_requests WHERE id=?", (payment["request_id"],)).fetchone()
+    if visa_lib.is_unlocked(visa_request):
+        flash("✅ Payment verified.", "success")
+        return _visa_post_unlock_redirect(visa_request)
+    if payment["gateway_status"] == "pending":
+        flash("📱 Payment request sent - waiting for M-PESA authorization. {} Your payment will be confirmed "
+              "automatically once Paystack reports it as successful.".format(
+                  (payment["gateway_message"] or "Check your phone.").rstrip(".") + "."), "info")
+    else:
+        flash("Paystack could not complete this M-PESA payment{}. Nothing was marked as paid and you have not "
+              "been charged for this failed attempt - please check the number and try again.".format(
+                  f": {payment['gateway_message']}" if payment["gateway_message"] else ""), "warning")
+    return back
 
 
 @app.route("/student-visa/payment/<int:request_id>/paystack/check", methods=["POST"])
@@ -2739,8 +2827,9 @@ def student_visa_paystack_check(request_id):
         flash("⏳ Your payment is still being processed. If you have entered your M-PESA PIN, wait a moment "
               "and check again.", "info")
     elif latest is not None:
-        flash("Your payment was not completed. You have not been charged for an unsuccessful payment - you can "
-              "try again.", "warning")
+        flash("Your payment was not completed{}. You have not been charged for an unsuccessful payment - you can "
+              "try again.".format(f" (Paystack: {latest['gateway_message']})" if latest["gateway_message"] else ""),
+              "warning")
     return redirect(_paystack_page_url(visa_request))
 
 
@@ -2784,7 +2873,9 @@ def paystack_webhook():
         event = json.loads(raw.decode("utf-8") or "{}")
     except ValueError:
         return "", 400
-    if event.get("event") == "charge.success":
+    # charge.success and a failed charge are both RE-VERIFIED with Paystack;
+    # only a verified success with the exact amount/currency/reference unlocks.
+    if event.get("event") in ("charge.success", "charge.failed"):
         reference = str(((event.get("data") or {}).get("reference")) or "")[:100]
         db = g.db
         payment = db.execute("SELECT * FROM visa_payments WHERE paystack_reference = ? AND gateway = 'paystack'",

@@ -25,10 +25,12 @@
 
     {% if paystack_latest and paystack_latest.gateway_status == 'pending' %}
       <div class="alert alert-info" role="status" id="paymentPending">
-        <strong>⏳ Payment is being processed.</strong>
         {% if paystack_latest.gateway_method == 'mpesa_prompt' %}
-          Check your phone for the M-PESA prompt and enter your PIN. {% if paystack_latest.gateway_message %}<span class="d-block small mt-1">{{ paystack_latest.gateway_message }}</span>{% endif %}
+          <strong>📱 Payment request sent - waiting for M-PESA authorization.</strong>
+          Check your phone and complete the M-PESA authorization. Your payment will be confirmed automatically
+          once Paystack reports it as successful. {% if paystack_latest.gateway_message %}<span class="d-block small mt-1">{{ paystack_latest.gateway_message }}</span>{% endif %}
         {% else %}
+          <strong>⏳ Payment verification in progress.</strong>
           If you completed the payment on Paystack, it will be confirmed shortly.
         {% endif %}
         <form method="POST" action="{{ url_for('student_visa_paystack_check', request_id=visa_request.id) }}" class="mt-2">
@@ -38,6 +40,7 @@
     {% elif paystack_latest and paystack_latest.gateway_status in ('failed', 'abandoned', 'cancelled') %}
       <div class="alert alert-warning" role="status" id="paymentNotCompleted">
         Your last payment attempt was not completed ({{ paystack_labels.get(paystack_latest.gateway_status, paystack_latest.gateway_status) }}).
+        {% if paystack_latest.gateway_message %}<span class="d-block small">Paystack: {{ paystack_latest.gateway_message }}</span>{% endif %}
         Your documents are kept - you can try again below.
       </div>
     {% endif %}
