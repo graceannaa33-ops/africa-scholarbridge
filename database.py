@@ -1006,6 +1006,11 @@ def _init_db():
         "visa_verification_status": "TEXT",   # NULL | 'VERIFIED' | 'FAILED'
         "visa_verification_notes": "TEXT",    # reasons for the last automatic decision
         "visa_verified_at": "TEXT",
+        # Amount of funding the student requests, in whole Kenyan shillings
+        # (asked on the Financial step, shown with the bank/disbursement
+        # details and on Review). A REQUEST only - never an approved amount.
+        # NULL for applications started before this field existed.
+        "requested_amount_ksh": "INTEGER",
     }.items():
         if col not in existing_cols:
             _add_column(cur, "funding_applications", col, definition)

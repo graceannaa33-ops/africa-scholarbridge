@@ -455,7 +455,9 @@ def full_footprint(client, student):
     execute("""UPDATE visa_payments SET phone_number = ?, student_name = ?, student_email = ?, student_phone = ?,
                       submitted_mpesa_message = ?, admin_incoming_mpesa_message = ? WHERE student_id = ?""",
             (m["phone"], m["name"], m["email"], m["phone"], m["mpesa_message"], m["admin_mpesa_message"], sid))
-    execute("""INSERT INTO student_bank_details (student_id, application_id, country, bank_name, account_holder_name,
+    # The flow above already saved (fictional) bank details for this application; one row per
+    # application, so replace it with the marker values that must disappear on deletion.
+    execute("""INSERT OR REPLACE INTO student_bank_details (student_id, application_id, country, bank_name, account_holder_name,
                       account_number, iban, mobile_money_number) VALUES (?, ?, 'Kenya', 'Test Bank', ?, ?, ?, ?)""",
             (sid, app_id, m["name"], m["account_number"], m["iban"], m["phone"]))
     execute("INSERT INTO documents (application_id, document_type, status, file_path) VALUES (?, 'Transcript', 'Uploaded', ?)",

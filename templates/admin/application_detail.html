@@ -21,6 +21,7 @@
             <tr><th>Education Level</th><td>{{ application.education_level }}</td></tr>
             <tr><th>Field of Study</th><td>{{ application.field_of_study }}</td></tr>
             <tr><th>Funding Type Needed</th><td>{{ application.funding_type_needed }}</td></tr>
+            <tr><th>Requested Funding Amount</th><td>{{ 'KSh {:,}'.format(application.requested_amount_ksh) if application.requested_amount_ksh else '—' }} <span class="small text-muted">(requested, not approved)</span></td></tr>
             <tr><th>Estimated Financial Need</th><td>{{ application.estimated_financial_need }}</td></tr>
             <tr><th>Preferences</th><td>{{ application.preferences }}</td></tr>
             <tr><th>Personal Statement</th><td>{{ application.personal_statement }}</td></tr>

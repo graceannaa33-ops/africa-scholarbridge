@@ -62,7 +62,7 @@
               </div>
 
             {% elif step_name == 'funding_need' %}
-              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Funding Need</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Funding Information</h4>
               <div class="row g-3">
                 <div class="col-12"><label class="form-label">Funding Type Needed</label>
                   <input type="text" name="funding_type_needed" class="form-control" value="{{ application.funding_type_needed or '' }}" placeholder="e.g. Full tuition, partial support"></div>
@@ -82,8 +82,16 @@
               </div>
 
             {% elif step_name == 'financial' %}
-              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Financial Information</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Financial Information &amp; Amount Requested</h4>
               <div class="row g-3">
+                <div class="col-md-6"><label class="form-label fw-semibold" for="requestedAmount">Requested Funding Amount (KSh) <span class="text-danger">*</span></label>
+                  <div class="input-group">
+                    <span class="input-group-text">KSh</span>
+                    <input type="text" id="requestedAmount" name="requested_amount_ksh" class="form-control" inputmode="numeric"
+                           value="{{ '{:,}'.format(application.requested_amount_ksh) if application.requested_amount_ksh else '' }}"
+                           placeholder="e.g. 75,000" maxlength="15" required>
+                  </div>
+                  <div class="form-text">The amount of funding you are requesting. Requested amount only — final funding decisions are subject to review. Next, you'll add your bank account details for disbursement.</div></div>
                 <div class="col-12"><label class="form-label">Household Financial Situation</label>
                   <textarea name="household_situation" class="form-control" rows="2" placeholder="e.g. Household monthly income about KSh 25,000 (KSh 300,000 a year); expected education cost KSh 100,000">{{ application.household_situation or '' }}</textarea></div>
                 <div class="col-md-6"><label class="form-label">Source of Support</label>
@@ -140,6 +148,15 @@
                 <tr><th>Education Level</th><td>{{ application.education_level }}</td></tr>
                 <tr><th>Field of Study</th><td>{{ application.field_of_study }}</td></tr>
                 <tr><th>Funding Type Needed</th><td>{{ application.funding_type_needed }}</td></tr>
+                <tr><th>Requested Funding Amount</th>
+                  <td id="reviewRequestedAmount">
+                    {% if application.requested_amount_ksh %}
+                      <strong>KSh {{ "{:,}".format(application.requested_amount_ksh) }}</strong>
+                      <div class="small text-muted">Requested amount only — final funding decisions are subject to review.</div>
+                    {% else %}
+                      <span class="badge bg-warning text-dark">⚠ Not entered yet</span>
+                    {% endif %}
+                  </td></tr>
                 <tr><th>Estimated Financial Need</th><td>{{ application.estimated_financial_need }}</td></tr>
                 <tr><th>🇺🇸 Visa Verification</th>
                   <td>
@@ -150,10 +167,14 @@
                     {% endif %}
                   </td>
                 </tr>
-                <tr><th>🏦 Funding Payment Information</th>
-                  <td>
+                <tr><th>🏦 Bank Account / Disbursement Information</th>
+                  <td id="reviewBankDetails">
                     {% if application.bank_step_status == 'COMPLETE' %}
-                      <span class="badge bg-success">✓ Complete - Payment Information Submitted</span>
+                      <span class="badge bg-success">✓ Complete</span>
+                      {% if review_bank %}
+                      <div class="small mt-1">{{ review_bank.bank_name }}{% if review_bank.branch %} · {{ review_bank.branch }}{% endif %}<br>
+                        {{ review_bank.account_holder_name }} · {{ review_masked_account }}</div>
+                      {% endif %}
                     {% elif application.bank_step_status == 'NOT_REQUIRED' %}
                       <span class="badge bg-success">✓ Not Required for Your Matches</span>
                     {% elif application.bank_step_status == 'ACTION_REQUIRED' %}

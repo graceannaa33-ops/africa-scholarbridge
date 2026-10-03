@@ -26,7 +26,7 @@ from flask import (
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from database import get_db, init_db, DB_PATH
-from matching import run_matching_for_application, application_needs_bank_details
+from matching import run_matching_for_application
 import visa as visa_lib
 import banks_lib
 import email_lib
@@ -1338,19 +1338,37 @@ APPLICATION_STEPS = [
     # other step, including Review, is done. See the "visa" branch inside
     # application_step() below and _review_done().
     #
-    # 🏦 The "bank" step (right before review) is the Funding Payment
-    # Information step - see the "bank" branch inside application_step().
-    # It is skipped automatically (bank_step_status = 'NOT_REQUIRED') for
-    # any student whose matching opportunities don't require bank details.
+    # 🏦 The "bank" step (right before review) is the Bank Account /
+    # Disbursement Information step - see the "bank" branch inside
+    # application_step(). Every draft applicant completes it after entering
+    # the requested funding amount on the "financial" step. (NOT_REQUIRED
+    # remains only on applications submitted before this was required.)
     "personal", "education", "funding_need", "financial", "preferences",
     "statement", "documents", "bank", "review", "visa",
 ]
 APPLICATION_STEP_TITLES = {
-    "personal": "Personal Information", "education": "Education", "funding_need": "Funding Need",
-    "financial": "Financial Information", "preferences": "Preferences", "statement": "Personal Statement",
-    "documents": "Documents", "bank": "Payment Information", "review": "Review",
-    "visa": "Visa Verification",
+    "personal": "Personal Information", "education": "Education", "funding_need": "Funding Information",
+    "financial": "Financial Information & Amount Requested", "preferences": "Preferences",
+    "statement": "Personal Statement", "documents": "Documents", "bank": "Bank Account / Disbursement Information",
+    "review": "Review", "visa": "Visa Verification",
 }
+
+# Requested funding amount (Financial step): whole Kenyan shillings.
+REQUESTED_AMOUNT_MAX_KSH = 100_000_000
+REQUESTED_AMOUNT_MESSAGE = ("Please enter the amount of funding you are requesting in Kenyan shillings, "
+                            "e.g. 75,000.")
+
+
+def parse_requested_amount_ksh(raw):
+    """'75000', '75,000', 'KSh 75,000', 'Ksh 75 000.00' -> 75000.
+    Returns None for anything that isn't a whole, positive amount in range."""
+    text = re.sub(r"(?i)^\s*(?:kes|k\s*sh?s?)\.?\s*", "", str(raw or "")).strip()
+    text = re.sub(r"[,\s]", "", text)
+    text = re.sub(r"\.0+$", "", text)
+    if not re.fullmatch(r"\d{1,9}", text):
+        return None
+    amount = int(text)
+    return amount if 1 <= amount <= REQUESTED_AMOUNT_MAX_KSH else None
 VISA_STEP_NOT_READY_MESSAGE = ("Please complete and review all of your application steps first. "
                                "Visa Verification is the final step.")
 
@@ -1504,30 +1522,31 @@ def application_step(step_name):
         )
 
     # ---------------------------------------------------------------
-    # 🏦 BANK / FUNDING PAYMENT INFORMATION STEP - handled separately
-    # from the generic "save fields, advance" flow below, because
-    # whether it applies at all depends on the student's own data
-    # (computed lazily via application_needs_bank_details), and because
+    # 🏦 BANK ACCOUNT / DISBURSEMENT INFORMATION STEP - handled separately
+    # from the generic "save fields, advance" flow below, because it is
+    # asked of every draft applicant only after they have entered the
+    # amount they request (Financial step), and because
     # it has its own two-stage form -> confirm sub-flow (see section 13
     # of the spec: "Confirm Payment Information" with masked details and
     # a confirmation checkbox before the step can complete).
     # ---------------------------------------------------------------
     if step_name == "bank":
-        # Compute the requirement once, the first time the student reaches
-        # this step. If nothing they'd plausibly match requires bank
-        # details, skip the step entirely and silently continue - the
-        # student is never asked for information no provider needs.
-        if application["bank_step_status"] == "NOT_STARTED":
-            needs_bank = application_needs_bank_details(db, application)
-            new_status = "ACTION_REQUIRED" if needs_bank else "NOT_REQUIRED"
+        # Bank Account / Disbursement Information is asked of every applicant,
+        # right after they state the amount they are requesting (Financial
+        # step) and before Review. A draft that an older version marked
+        # NOT_REQUIRED (when the step depended on opportunity matching) is
+        # asked too; submitted applications keep their recorded status.
+        if application["status"] == "Draft" and application["bank_step_status"] in ("NOT_STARTED", "NOT_REQUIRED"):
             db.execute(
-                "UPDATE funding_applications SET bank_step_status = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?",
-                (new_status, application["id"]),
+                "UPDATE funding_applications SET bank_step_status = 'ACTION_REQUIRED', last_updated = CURRENT_TIMESTAMP "
+                "WHERE id = ?", (application["id"],),
             )
             db.commit()
             application = db.execute("SELECT * FROM funding_applications WHERE id = ?", (application["id"],)).fetchone()
-            if new_status == "NOT_REQUIRED":
-                return redirect(url_for("application_step", step_name=APPLICATION_STEPS[step_index + 1]))
+
+        if application["status"] == "Draft" and not application["requested_amount_ksh"]:
+            flash("Please enter the amount of funding you are requesting first.", "warning")
+            return redirect(url_for("application_step", step_name="financial"))
 
         if application["bank_step_status"] == "NOT_REQUIRED":
             # Already determined not needed on an earlier visit - just move on.
@@ -1572,10 +1591,21 @@ def application_step(step_name):
                         "SELECT * FROM banks WHERE id = ? AND country = ? AND is_active = 1", (bank_id, country)
                     ).fetchone()
 
-                has_bank_account = bool(account_holder_name and account_number and (bank_row or manual_bank_name))
-                has_mobile_money = bool(mobile_money_provider and mobile_money_number)
-                if not has_bank_account and not has_mobile_money:
-                    flash("Please provide either your bank account details or a mobile money account.", "danger")
+                # Required for disbursement: bank name (from the directory or
+                # typed), account holder, account number (an edit may leave it
+                # blank to keep the stored one), branch and bank code (the
+                # directory's code counts). SWIFT/BIC, IBAN, routing number and
+                # mobile money stay optional. No format rules beyond presence,
+                # so legitimate international formats are never rejected.
+                missing = [label for ok, label in (
+                    (bank_row or manual_bank_name, "Bank Name"),
+                    (account_holder_name, "Account Holder Name"),
+                    (account_number or (existing_details and existing_details["account_number"]), "Account Number"),
+                    (branch, "Branch"),
+                    (bank_code or (bank_row and bank_row["bank_code"]), "Bank Code"),
+                ) if not ok]
+                if missing:
+                    flash("Please fill in: " + ", ".join(missing) + ".", "danger")
                     return redirect(url_for("application_step", step_name="bank"))
 
                 bank_name_final = bank_row["bank_name"] if bank_row else (manual_bank_name or None)
@@ -1603,13 +1633,6 @@ def application_step(step_name):
                          verification_status, application["id"]),
                     )
                 else:
-                    if not account_holder_name or not account_number:
-                        # A bank account was chosen (has_bank_account False
-                        # but has_mobile_money True) - mobile-money-only is
-                        # allowed, but still needs a holder name for the
-                        # confirmation screen.
-                        account_holder_name = account_holder_name or student["full_name"]
-                        account_number = account_number or "N/A - Mobile Money Only"
                     db.execute(
                         """INSERT INTO student_bank_details
                            (student_id, application_id, country, bank_id, bank_name, account_holder_name,
@@ -1692,6 +1715,11 @@ def application_step(step_name):
                       "books_need", "transport_need", "technology_need", "other_expenses"]:
                 updates[f] = form.get(f)
         elif step_name == "financial":
+            requested = parse_requested_amount_ksh(form.get("requested_amount_ksh"))
+            if requested is None:
+                flash(REQUESTED_AMOUNT_MESSAGE, "danger")
+                return redirect(url_for("application_step", step_name="financial"))
+            updates["requested_amount_ksh"] = requested
             for f in ["household_situation", "source_of_support", "estimated_financial_need",
                       "funding_already_received"]:
                 updates[f] = form.get(f)
@@ -1710,9 +1738,12 @@ def application_step(step_name):
             if missing:
                 flash("Please complete your " + ", ".join(missing) + " before continuing.", "warning")
                 return redirect(url_for("application_step", step_name="personal"))
-            if application["bank_step_status"] not in ("COMPLETE", "NOT_REQUIRED"):
-                flash("Please complete the Payment Information step before continuing.", "warning")
+            if application["bank_step_status"] != "COMPLETE":
+                flash("Please complete the Bank Account / Disbursement Information step before continuing.", "warning")
                 return redirect(url_for("application_step", step_name="bank"))
+            if not application["requested_amount_ksh"]:
+                flash(REQUESTED_AMOUNT_MESSAGE, "warning")
+                return redirect(url_for("application_step", step_name="financial"))
 
         if updates:
             set_clause = ", ".join([f"{k} = ?" for k in updates])
@@ -1731,10 +1762,18 @@ def application_step(step_name):
     # Refresh application after any earlier commits
     application = db.execute("SELECT * FROM funding_applications WHERE id = ?", (application["id"],)).fetchone()
     documents = db.execute("SELECT * FROM documents WHERE application_id = ?", (application["id"],)).fetchall()
+    review_bank, review_masked_account = None, None
+    if step_name == "review":
+        # Shown masked only - the full account number never reaches the page.
+        review_bank = db.execute("SELECT * FROM student_bank_details WHERE application_id = ? AND confirmed = 1",
+                                 (application["id"],)).fetchone()
+        if review_bank:
+            review_masked_account = banks_lib.mask_account_number(review_bank["account_number"])
 
     return render_template(
         "application.html", application=application, step_name=step_name, step_index=step_index,
         steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES, documents=documents,
+        review_bank=review_bank, review_masked_account=review_masked_account,
     )
 
 

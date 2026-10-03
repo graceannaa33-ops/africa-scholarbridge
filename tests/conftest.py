@@ -73,6 +73,20 @@ def student(client):
     return {"email": email, "student_id": stu["id"]}
 
 
+TEST_BANK_DETAILS = {
+    "action": "save_details", "country": "Kenya", "manual_bank_name": "Example Bank",
+    "account_holder_name": "Alex Testperson", "account_number": "TEST-ACCOUNT-001", "account_type": "Savings",
+    "branch": "Example Branch", "bank_code": "TEST-BANK-001", "swift_bic": "", "iban": "",
+}
+
+
+def complete_bank_step(client, **overrides):
+    """Bank Account / Disbursement Information (fictional details), then
+    the confirmation screen."""
+    client.post("/application/step/bank", data={**TEST_BANK_DETAILS, **overrides})
+    return client.post("/application/step/bank", data={"action": "confirm", "confirm_accurate": "yes"})
+
+
 def complete_steps_before_visa(client):
     """Every Start Application step after "personal", up to and including
     Review - so the student stands at the FINAL step, Visa Verification."""
@@ -84,12 +98,13 @@ def complete_steps_before_visa(client):
         "living_expenses_need": "Partial", "books_need": "Partial", "transport_need": "Not Needed",
         "technology_need": "Not Needed", "other_expenses": ""})
     client.post("/application/step/financial", data={
+        "requested_amount_ksh": "75,000",
         "household_situation": "Single parent household", "source_of_support": "Family",
         "estimated_financial_need": "USD 3,000 / year", "funding_already_received": ""})
     client.post("/application/step/preferences", data={"preferences": ["International Study", "Scholarship"]})
     client.post("/application/step/statement", data={"personal_statement": "I want to study computer science."})
     client.post("/application/step/documents", data={})
-    client.get("/application/step/bank")          # decides whether bank details are needed
+    complete_bank_step(client)
     r = client.post("/application/step/review", data={})
     assert r.status_code == 302 and r.headers["Location"].endswith("/application/step/visa"), r.headers.get("Location")
     return r

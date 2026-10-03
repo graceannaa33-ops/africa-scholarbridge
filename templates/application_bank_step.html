@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Annual Funding Application — 🏦 Funding Payment Information — Africa ScholarBridge{% endblock %}
+{% block title %}Annual Funding Application — 🏦 Bank Account / Disbursement Information — Africa ScholarBridge{% endblock %}
 {% block content %}
 <div class="container py-4">
 
@@ -11,8 +11,14 @@
         <div class="card-body p-4 p-md-5">
 
           {% if existing_details and existing_details.confirmed %}
-            <h4 class="fw-bold mb-3 text-success">✅ Funding Payment Information Saved</h4>
-            <p class="text-muted mb-3">Your bank/payment details have been recorded for this annual application.</p>
+            <h4 class="fw-bold mb-3 text-success">✅ Bank Account / Disbursement Information Saved</h4>
+            <p class="text-muted mb-3">Your bank account details have been recorded for this annual application.</p>
+            {% if application.requested_amount_ksh %}
+            <div class="border rounded bg-light p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2" id="requestedAmount">
+              <span>Requested Funding Amount: <strong>KSh {{ "{:,}".format(application.requested_amount_ksh) }}</strong></span>
+              <span class="small text-muted">Requested amount only — final funding decisions are subject to review.</span>
+            </div>
+            {% endif %}
             <table class="table table-sm">
               <tr><th>Country</th><td>{{ existing_details.country }}</td></tr>
               <tr><th>Bank</th><td>{{ existing_details.bank_name }}
@@ -23,6 +29,7 @@
               <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
               <tr><th>Account</th><td>{{ masked_account }}</td></tr>
               <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
+              {% if existing_details.branch %}<tr><th>Branch</th><td>{{ existing_details.branch }}</td></tr>{% endif %}
               {% if existing_details.mobile_money_provider %}
               <tr><th>Mobile Money</th><td>{{ existing_details.mobile_money_provider }} — •••• {{ (existing_details.mobile_money_number or '')[-4:] }}</td></tr>
               {% endif %}
@@ -30,8 +37,7 @@
             <div class="alert alert-info small">
               If your funding application is approved by the relevant funding provider, payment will be handled
               according to that provider's official disbursement process. Africa ScholarBridge does not guarantee
-              or directly send funding money — bank details are collected only when required for a legitimate
-              funding or payment process.
+              or directly send funding money. Providing bank details does not guarantee funding approval.
             </div>
             <div class="d-flex gap-2">
               <form method="POST">
@@ -45,16 +51,23 @@
             </div>
 
           {% elif existing_details %}
-            <h4 class="fw-bold mb-3">Confirm Payment Information</h4>
+            <h4 class="fw-bold mb-3">Confirm Bank Account / Disbursement Information</h4>
             <p class="text-muted mb-3">Please carefully check your bank details before submitting.</p>
+            {% if application.requested_amount_ksh %}
+            <div class="border rounded bg-light p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2" id="requestedAmount">
+              <span>Requested Funding Amount: <strong>KSh {{ "{:,}".format(application.requested_amount_ksh) }}</strong></span>
+              <span class="small text-muted">Requested amount only — final funding decisions are subject to review.</span>
+            </div>
+            {% endif %}
             <table class="table table-sm">
               <tr><th>Country</th><td>{{ existing_details.country }}</td></tr>
               <tr><th>Bank</th><td>{{ existing_details.bank_name }}</td></tr>
               <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
               <tr><th>Account</th><td>{{ masked_account }}</td></tr>
               <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
+              {% if existing_details.branch %}<tr><th>Branch</th><td>{{ existing_details.branch }}</td></tr>{% endif %}
             </table>
-            <p class="small text-muted mb-3">These details may be used only when required by an eligible funding provider for payment processing.</p>
+            <p class="small text-muted mb-3">These details may be used only for funding disbursement if your application is approved.</p>
             <form method="POST">
               <input type="hidden" name="action" value="confirm">
               <div class="form-check mb-3">
@@ -71,15 +84,21 @@
             </form>
 
           {% else %}
-            <h4 class="fw-bold mb-3">🏦 Funding Payment Information</h4>
-            <p class="mb-4">If your selected funding provider requires bank information for payment or reimbursement,
-              provide your bank details below. Requirements vary by funding provider and country.</p>
+            <h4 class="fw-bold mb-3">🏦 Bank Account / Disbursement Information</h4>
+            <p class="mb-3">Provide the account details that could be used for funding disbursement if your application is approved. Providing bank details does not guarantee funding approval.</p>
+            {% if application.requested_amount_ksh %}
+            <div class="border rounded bg-light p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2" id="requestedAmount">
+              <span>Requested Funding Amount: <strong>KSh {{ "{:,}".format(application.requested_amount_ksh) }}</strong></span>
+              <span class="small text-muted">Requested amount only — final funding decisions are subject to review.</span>
+            </div>
+            {% endif %}
+            <p class="small text-muted mb-3">Fields marked <span class="text-danger">*</span> are required.</p>
 
             <form method="POST" id="bankDetailsForm">
               <input type="hidden" name="action" value="save_details">
 
               <div class="mb-3">
-                <label class="form-label fw-semibold">Country</label>
+                <label class="form-label fw-semibold">Country <span class="text-danger">*</span></label>
                 <select name="country" id="bankCountry" class="form-select" required>
                   <option value="">Select your country…</option>
                   {% for c in countries %}
@@ -89,7 +108,8 @@
               </div>
 
               <div class="mb-3">
-                <label class="form-label fw-semibold">Search your bank</label>
+                <label class="form-label fw-semibold">Bank Name <span class="text-danger">*</span></label>
+                <div class="form-text mt-0 mb-2">Search for your bank, or tick “My bank is not listed” and type its name.</div>
                 <input type="text" id="bankSearch" class="form-control mb-2" placeholder="Search bank name, code, or SWIFT/BIC…" disabled>
                 <select name="bank_id" id="bankSelect" class="form-select" disabled>
                   <option value="">Select your country first…</option>
@@ -103,13 +123,13 @@
 
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
-                  <label class="form-label">Account Holder Name</label>
-                  <input type="text" name="account_holder_name" class="form-control" placeholder="e.g. Alex Testperson">
+                  <label class="form-label">Account Holder Name <span class="text-danger">*</span></label>
+                  <input type="text" name="account_holder_name" class="form-control" placeholder="e.g. Alex Testperson" maxlength="200" required>
                   <div class="form-text">Exactly as it appears on your account.</div>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">Account Number</label>
-                  <input type="text" name="account_number" class="form-control" autocomplete="off" placeholder="e.g. TEST-ACCOUNT-001">
+                  <label class="form-label">Account Number <span class="text-danger">*</span></label>
+                  <input type="text" name="account_number" class="form-control" autocomplete="off" placeholder="e.g. TEST-ACCOUNT-001" maxlength="64" required>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Account Type</label>
@@ -118,20 +138,21 @@
                   </select>
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">Branch <span class="text-muted small">(optional)</span></label>
-                  <input type="text" name="branch" class="form-control" placeholder="e.g. Exampletown Branch">
+                  <label class="form-label">Branch <span class="text-danger">*</span></label>
+                  <input type="text" name="branch" class="form-control" placeholder="e.g. Example Branch" maxlength="120" required>
                 </div>
-                <div class="col-md-6" id="bankCodeField" style="display:none;">
-                  <label class="form-label">Bank Code / SWIFT / BIC</label>
-                  <input type="text" name="bank_code" class="form-control" placeholder="e.g. TEST-CODE-01">
+                <div class="col-md-6" id="bankCodeField">
+                  <label class="form-label">Bank Code <span class="text-danger">*</span></label>
+                  <input type="text" name="bank_code" class="form-control" placeholder="e.g. TEST-BANK-001" maxlength="40">
+                  <div class="form-text">Filled in for you when you pick a listed bank that has one.</div>
                 </div>
-                <div class="col-md-6" id="swiftField" style="display:none;">
-                  <label class="form-label">SWIFT / BIC</label>
-                  <input type="text" name="swift_bic" class="form-control" placeholder="e.g. TESTXXXX">
+                <div class="col-md-6" id="swiftField">
+                  <label class="form-label">SWIFT / BIC <span class="text-muted small">(optional)</span></label>
+                  <input type="text" name="swift_bic" class="form-control" placeholder="e.g. TESTSWIFTXXX" maxlength="11">
                 </div>
                 <div class="col-md-6">
-                  <label class="form-label">IBAN <span class="text-muted small">(if applicable)</span></label>
-                  <input type="text" name="iban" class="form-control" placeholder="e.g. XX00 TEST 0000 0000 0001">
+                  <label class="form-label">IBAN <span class="text-muted small">(optional)</span></label>
+                  <input type="text" name="iban" class="form-control" placeholder="e.g. TEST-IBAN-001" maxlength="40">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Routing Number <span class="text-muted small">(if applicable)</span></label>
@@ -140,7 +161,7 @@
               </div>
 
               <div class="border rounded p-3 mb-3">
-                <p class="fw-semibold mb-2">Mobile Money <span class="text-muted small fw-normal">(where legitimately supported by your provider)</span></p>
+                <p class="fw-semibold mb-2">Mobile Money <span class="text-muted small fw-normal">(optional, in addition to your bank account — where legitimately supported by your provider)</span></p>
                 <div class="row g-2">
                   <div class="col-md-6">
                     <label class="form-label small">Mobile Money Provider</label>
@@ -155,9 +176,8 @@
 
               <div class="alert alert-light border small">
                 If your funding application is approved by the relevant funding provider, payment will be handled
-                according to that provider's official disbursement process. Bank details are collected only when
-                required for a legitimate funding or payment process. Your information is stored securely and
-                masked everywhere it is displayed.
+                according to that provider's official disbursement process. Providing bank details does not guarantee
+                funding approval. Your information is stored securely and masked everywhere it is displayed.
               </div>
 
               <button type="submit" class="btn btn-primary fw-semibold">SAVE &amp; CONTINUE</button>
