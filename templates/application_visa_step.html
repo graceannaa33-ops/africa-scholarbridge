@@ -142,7 +142,8 @@
             <h4 class="fw-bold mb-3 text-warning">⚠ USA Student Visa Assistance — Action Required</h4>
             {% if linked_visa_request and linked_visa_request.form_first %}
               {% if not linked_visa_request.form_submitted_at %}
-                <p>You told us you do not have a visa. Complete the <strong>visa application form</strong>, upload your documents and sign the declaration. Payment comes after the form.</p>
+                <p>You told us you do not have a visa. Complete the <strong>visa application form</strong> and upload your documents, then pay the visa assistance fee and sign the declaration.</p>
+                {% if linked_visa_request.payment_verified %}<p class="small text-success mb-2">✓ Payment verified - finish Additional Information and the Declaration.</p>{% endif %}
                 <a href="{{ url_for('student_visa_application', request_id=linked_visa_request.id) }}" class="btn btn-primary fw-semibold">Continue Visa Application Form &rarr;</a>
               {% else %}
                 <p>Your visa application form has been submitted. The last step is the visa assistance service fee.</p>

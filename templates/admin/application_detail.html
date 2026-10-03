@@ -37,6 +37,9 @@
             <tr><th>Visa Application</th><td>{{ visa_summary.visa_application }}</td></tr>
             <tr><th>Payment Status</th><td>{{ visa_summary.payment_status }}</td></tr>
             <tr><th>Payment Amount</th><td>{{ visa_summary.payment_amount or '—' }}</td></tr>
+            <tr><th>Currency</th><td>{{ visa_summary.payment_currency or '—' }}</td></tr>
+            <tr><th>Payment Method</th><td>{{ visa_summary.payment_method or '—' }}</td></tr>
+            <tr><th>Transaction Status</th><td>{{ visa_summary.transaction_status or '—' }}</td></tr>
             <tr><th>Payment Reference</th><td class="font-monospace">{{ visa_summary.payment_reference or '—' }}</td></tr>
             <tr><th>Payment Date</th><td>{{ visa_summary.payment_date or '—' }}</td></tr>
             <tr><th>Visa Review</th><td>{{ visa_summary.visa_review }}</td></tr>

@@ -16,6 +16,7 @@ from werkzeug.security import generate_password_hash
 
 import app as app_module
 from conftest import (APPLICANT, VISA_FORM_ANSWERS, choose_yes, complete_steps_before_visa, complete_visa_form,
+                      finish_visa_form,
                       get_application, make_pdf, upload, upload_visa_support_doc, valid_case)
 from database import get_db
 
@@ -69,6 +70,14 @@ def main_admin_client():
         s["role"] = "admin"
         s["user_id"] = uid
     return c
+
+
+def pay_manually(client, request_id):
+    """Existing manual M-PESA path (Paystack not configured): SMS + Visa Admin verify."""
+    sms, _ = mpesa_sms()
+    client.post(f"/student-visa/payment/{request_id}/submit", data={"mpesa_message": sms})
+    pay = q("SELECT id FROM visa_payments WHERE request_id = ? ORDER BY id DESC", (request_id,))[0][0]
+    visa_admin_client().post(f"/visa-admin/payment-proof/{pay}/review", data={"action": "verify", "confirm_received": "yes"})
 
 
 def flashes(client):
@@ -166,7 +175,8 @@ def test_has_visa_branch_to_completed_application(client, student):
 # ---------------------------------------------------------------------
 # Branch 2: applicant does NOT have a visa
 # ---------------------------------------------------------------------
-def test_no_visa_branch_form_documents_declaration_payment_completion(client, student):
+def test_no_visa_branch_form_documents_payment_declaration_completion(client, student):
+    """NO visa: form -> documents -> PAYMENT -> additional info -> declaration -> completed."""
     before = dict(get_application(student["student_id"]))
     r = client.post("/application/step/visa", data={"visa_choice": "no"})
     vr = request_of(student)
@@ -178,54 +188,59 @@ def test_no_visa_branch_form_documents_declaration_payment_completion(client, st
     assert "USA Student Visa Assistance" in page
     assert "We are not the U.S. government, U.S. Embassy, USCIS" in page
     assert "Applicant Personal Information" in page
-    # pre-filled from the funding application
-    assert APPLICANT["full_name"] in page
+    assert APPLICANT["full_name"] in page                                       # pre-filled
 
-    # payment is NOT available before the form
+    # payment is NOT available before the form + required documents
     r = client.get(f"/student-visa/payment/{vr['id']}")
     assert r.status_code == 302 and f"/student-visa/application/{vr['id']}" in r.headers["Location"]
     sms, code = mpesa_sms()
     client.post(f"/student-visa/payment/{vr['id']}/submit", data={"mpesa_message": sms})
     assert q("SELECT COUNT(*) FROM visa_payments WHERE request_id = ?", (vr["id"],))[0][0] == 0
     assert client.post(f"/student-visa/payment/{vr['id']}/parse", data={"mpesa_message": sms}).status_code == 409
+    docs_page = client.get(f"/student-visa/application/{vr['id']}/step/documents").get_data(as_text=True)
+    assert 'id="paymentNotYet"' in docs_page and 'id="documentsComplete"' not in docs_page
 
-    # every section, then documents, then the declaration
+    # sections 1-9 + documents -> the payment appears right after the upload
     complete_visa_form(client, vr["id"], sign=False)
     vr = request_of(student)
     assert vr["passport_number"] == "AK1234567" and vr["visa_category"] == "Student Visa"
     assert vr["destination_country"] == "United States of America" and vr["form_submitted_at"] is None
+    docs_page = " ".join(client.get(f"/student-visa/application/{vr['id']}/step/documents").get_data(as_text=True).split())
+    assert "All required documents uploaded successfully." in docs_page and "✓ Documents uploaded successfully" in docs_page
+    assert "Next step: Visa Assistance Payment" in docs_page
+    # additional info + declaration are locked until payment is verified
+    for step in ("additional", "declaration"):
+        assert client.get(f"/student-visa/application/{vr['id']}/step/{step}").headers["Location"].endswith("/step/documents")
     r = client.post(f"/student-visa/application/{vr['id']}/submit",
                     data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
-    assert r.headers["Location"].endswith(f"/student-visa/payment/{vr['id']}")
-    vr = request_of(student)
-    assert vr["form_submitted_at"] and vr["declaration_confirmed"] == 1 and vr["declaration_name"] == APPLICANT["full_name"]
+    assert r.headers["Location"].endswith("/step/documents") and request_of(student)["form_submitted_at"] is None
 
-    # payment page: the configured Visa Assistance Service Fee
     page = client.get(f"/student-visa/payment/{vr['id']}").get_data(as_text=True)
     assert "Visa Assistance Service Fee" in page and "KSh 1,500" in page
-    # the form is now locked (no edits between declaration and payment)
-    assert client.get(f"/student-visa/application/{vr['id']}/step/personal").headers[
-        "Location"].endswith(f"/student-visa/payment/{vr['id']}")
-
     client.post(f"/student-visa/payment/{vr['id']}/submit", data={"mpesa_message": sms, "payment_phone": "0712345678"})
     [pay] = q("SELECT * FROM visa_payments WHERE request_id = ?", (vr["id"],))
     assert pay["payment_status"] == "PAYMENT_PENDING"
-    assert get_application(student["student_id"])["status"] == "Draft"       # not completed before confirmation
 
-    # admin confirms payment -> paid, application completed with reference
     admin = visa_admin_client()
     admin.post(f"/visa-admin/payment-proof/{pay['id']}/review", data={"action": "verify", "confirm_received": "yes"})
     vr = request_of(student)
     assert vr["payment_status"] == "paid" and vr["payment_verified"] == 1
-    assert vr["application_status"] == "preparation"                           # visa review started
     row = get_application(student["student_id"])
+    assert row["status"] == "Draft" and row["visa_payment_status"] == "PAID"     # not complete before the declaration
+    assert row["visa_step_status"] == "ACTION_REQUIRED"
+    r = client.get(f"/student-visa/payment/{vr['id']}")
+    assert r.headers["Location"].endswith(f"/student-visa/application/{vr['id']}/step/additional")
+
+    # 11 + 12 -> application completed
+    r = finish_visa_form(client, vr["id"])
+    vr = request_of(student)
+    row = get_application(student["student_id"])
+    assert vr["form_submitted_at"] and vr["declaration_confirmed"] == 1 and vr["declaration_name"] == APPLICANT["full_name"]
+    assert vr["application_status"] == "preparation"                           # visa review started
     assert row["status"] != "Draft" and row["reference_number"].startswith("ASB-")
     assert row["visa_payment_status"] == "PAID" and row["visa_step_status"] == "COMPLETE"
     for f in ("full_name", "institution", "course", "personal_statement", "preferences"):
         assert row[f] == before[f], f
-
-    # the student lands on the confirmation page
-    r = client.get(f"/student-visa/payment/{vr['id']}")
     assert r.headers["Location"].endswith(f"/application/confirmation/{row['id']}")
     page = " ".join(client.get(r.headers["Location"]).get_data(as_text=True).split())
     assert "Application Completed Successfully" in page
@@ -233,19 +248,23 @@ def test_no_visa_branch_form_documents_declaration_payment_completion(client, st
     assert "Your Africa ScholarBridge application and visa assistance submission have been received successfully." in page
     assert "Payment does not guarantee visa approval" in page
     assert vr["request_number"] in page
+    # the form is locked once submitted
+    assert client.get(f"/student-visa/application/{vr['id']}/step/personal").status_code == 302
 
 
 def test_declaration_rules(client, student):
     client.post("/application/step/visa", data={"visa_choice": "no"})
     vr = request_of(student)
-    # nothing filled yet -> sent to the first incomplete section
-    for step in ("personal", "contact"):
-        client.post(f"/student-visa/application/{vr['id']}/step/{step}", data=VISA_FORM_ANSWERS[step])
+    complete_visa_form(client, vr["id"], sign=False)
+    pay_manually(client, vr["id"])
+    client.post(f"/student-visa/application/{vr['id']}/step/additional", data=VISA_FORM_ANSWERS["additional"])
+    # required sections re-checked at the declaration
+    client.post(f"/student-visa/application/{vr['id']}/step/passport", data={"passport_status": ""})
     r = client.post(f"/student-visa/application/{vr['id']}/submit",
                     data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
     assert r.headers["Location"].endswith("/step/passport")
-    complete_visa_form(client, vr["id"], sign=False)
-    # required documents
+    client.post(f"/student-visa/application/{vr['id']}/step/passport", data=VISA_FORM_ANSWERS["passport"])
+    # required documents re-checked too
     doc = q("SELECT id FROM visa_documents WHERE request_id = ? AND document_type = 'Valid Passport'", (vr["id"],))[0][0]
     client.post(f"/student-visa/application/{vr['id']}/documents/{doc}/remove")
     r = client.post(f"/student-visa/application/{vr['id']}/submit",
@@ -341,7 +360,10 @@ def test_supporting_document_upload_security(client, student):
 def test_documents_locked_after_declaration(client, student):
     client.post("/application/step/visa", data={"visa_choice": "no"})
     vr = request_of(student)
-    complete_visa_form(client, vr["id"])
+    complete_visa_form(client, vr["id"], sign=False)
+    pay_manually(client, vr["id"])
+    finish_visa_form(client, vr["id"])
+    assert request_of(student)["form_submitted_at"]
     n = q("SELECT COUNT(*) FROM visa_documents WHERE request_id = ? AND stored_file IS NOT NULL", (vr["id"],))[0][0]
     upload_visa_support_doc(client, vr["id"], "National ID")
     assert q("SELECT COUNT(*) FROM visa_documents WHERE request_id = ? AND stored_file IS NOT NULL",
@@ -354,14 +376,14 @@ def test_documents_locked_after_declaration(client, student):
 def test_main_admin_sees_summary_but_no_sensitive_data(client, student):
     client.post("/application/step/visa", data={"visa_choice": "no"})
     vr = request_of(student)
-    complete_visa_form(client, vr["id"])
+    complete_visa_form(client, vr["id"], sign=False)
     sms, code = mpesa_sms()
     client.post(f"/student-visa/payment/{vr['id']}/submit", data={"mpesa_message": sms})
     app_id = get_application(student["student_id"])["id"]
     main = main_admin_client()
     detail = main.get(f"/admin/applications/{app_id}").get_data(as_text=True)
     summary = detail.split('id="visaSummary"')[1].split("</table>")[0]
-    for expected in ("Awaiting Payment", ">No<", "Submitted", "Pending Verification", "KSh 1,500", code):
+    for expected in ("Awaiting Payment", ">No<", "Not submitted", "Pending Verification", "KSh 1,500", code):
         assert expected in summary, expected
     for secret in ("AK1234567", "34567890", "Confirmed. Ksh 1500 sent to", "/visa-admin/visa-application-documents",
                    "/student-visa/documents/file", "/visa-admin/payment-proof", "Ngong Rd", "USD 5,000"):
@@ -390,13 +412,15 @@ def test_visa_status_labels_follow_the_workflow(client, student):
     client.post("/application/step/visa", data={"visa_choice": "no"})
     assert label() == "Visa Assistance Required"
     vr = request_of(student)
-    complete_visa_form(client, vr["id"])
-    assert label() == "Visa Form Submitted"
+    complete_visa_form(client, vr["id"], sign=False)
+    assert label() == "Visa Assistance Required"           # documents in, not paid yet
     sms, _ = mpesa_sms()
     client.post(f"/student-visa/payment/{vr['id']}/submit", data={"mpesa_message": sms})
     assert label() == "Awaiting Payment"
     pay = q("SELECT id FROM visa_payments WHERE request_id = ?", (vr["id"],))[0][0]
     visa_admin_client().post(f"/visa-admin/payment-proof/{pay}/review", data={"action": "verify", "confirm_received": "yes"})
+    assert label() == "Paid"                                # paid, declaration still to sign
+    finish_visa_form(client, vr["id"])
     assert label() == "Under Review"
     db.close()
 
@@ -461,6 +485,8 @@ def test_standalone_visa_service_still_pays_first():
     (" Photo ; bogus ", ["Passport-size Photograph"]),
 ])
 def test_required_documents_policy(client, student, monkeypatch, policy, needed):
+    """The policy decides which documents must be uploaded before the
+    payment (and therefore everything after it) becomes available."""
     if policy is None:
         monkeypatch.delenv("VISA_REQUIRED_DOCUMENTS", raising=False)
     else:
@@ -475,16 +501,12 @@ def test_required_documents_policy(client, student, monkeypatch, policy, needed)
         assert all(n in box for n in needed) and "Required:" in box
     else:
         assert "All documents are optional" in box
-    # with NO documents uploaded, the declaration is accepted only when nothing is required
-    r = client.post(f"/student-visa/application/{vr['id']}/submit",
-                    data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
+    # with NO documents uploaded, payment opens only when nothing is required
+    r = client.get(f"/student-visa/payment/{vr['id']}")
     if needed:
-        assert r.headers["Location"].endswith("/step/documents")
-        assert request_of(student)["form_submitted_at"] is None
-        assert all(n in flashes(client) for n in needed)
+        assert r.status_code == 302 and 'id="paymentNotYet"' in page and 'id="documentsComplete"' not in page
     else:
-        assert r.headers["Location"].endswith(f"/student-visa/payment/{vr['id']}")
-        assert request_of(student)["form_submitted_at"]
+        assert r.status_code == 200 and 'id="documentsComplete"' in page
 
 
 def test_no_passport_requires_national_id_when_identity_is_required(client, student, monkeypatch):
@@ -495,10 +517,8 @@ def test_no_passport_requires_national_id_when_identity_is_required(client, stud
         client.post(f"/student-visa/application/{vr['id']}/step/{step}", data=answers)
     client.post(f"/student-visa/application/{vr['id']}/step/passport",
                 data={"passport_status": "I do not currently have a passport"})
-    r = client.post(f"/student-visa/application/{vr['id']}/submit",
-                    data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
-    assert r.headers["Location"].endswith("/step/documents") and "National ID" in flashes(client)
+    page = client.get(f"/student-visa/application/{vr['id']}/step/documents").get_data(as_text=True)
+    assert "National ID" in page.split('id="requiredDocuments"')[1].split("</p>")[0]
+    assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 302          # not before the ID
     upload_visa_support_doc(client, vr["id"], "National ID", make_pdf(["ID"]), "id.pdf")
-    r = client.post(f"/student-visa/application/{vr['id']}/submit",
-                    data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
-    assert r.headers["Location"].endswith(f"/student-visa/payment/{vr['id']}")
+    assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 200          # right after it

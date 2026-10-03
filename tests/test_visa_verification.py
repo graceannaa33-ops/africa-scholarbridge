@@ -6,7 +6,8 @@ from datetime import date, timedelta
 import pytest
 
 import visa_verification as vv
-from conftest import (FILENAMES, PNG_BYTES, UPLOAD_DIR, choose_yes, count_applications, get_application,
+from conftest import (FILENAMES, PNG_BYTES, UPLOAD_DIR, choose_yes, complete_visa_form, count_applications,
+                      finish_visa_form, get_application,
                       image_bytes, make_mrz, make_pdf, upload, valid_case, visa_requests_for)
 from database import get_db
 
@@ -294,6 +295,7 @@ def test_after_failure_existing_mpesa_verification_lets_student_continue(client,
     r = upload(client, valid_case()[0], PNG_BYTES, "visa.png")
     row = _assert_failed_to_assistance(client, student, r)
     request_id = visa_requests_for(row["id"])[0]["id"]
+    complete_visa_form(client, request_id, sign=False)          # form + documents, then payment
     with app_module.app.test_request_context():
         db = get_db()
         vr = db.execute("SELECT * FROM visa_requests WHERE id = ?", (request_id,)).fetchone()
@@ -301,10 +303,13 @@ def test_after_failure_existing_mpesa_verification_lets_student_continue(client,
         db.commit()
         db.close()
     row = get_application(student["student_id"])
+    assert row["visa_payment_status"] == "PAID" and row["visa_status"] == "NEEDS_ASSISTANCE"
+    r = finish_visa_form(client, request_id)                    # additional info + declaration
+    row = get_application(student["student_id"])
     assert row["visa_step_status"] == "COMPLETE" and row["visa_status"] == "NEEDS_ASSISTANCE"
-    assert client.post("/application/step/visa", data={"action": "continue"}).headers[
-        "Location"].endswith("/application/submit")
-    assert client.get("/application/submit").status_code == 200
+    assert row["status"] != "Draft" and row["reference_number"]
+    assert count_applications(student["student_id"]) == 1 and len(visa_requests_for(row["id"])) == 1
+    assert r.headers["Location"].endswith(f"/application/confirmation/{row['id']}")
 
 
 # ---------------------------------------------------------------------

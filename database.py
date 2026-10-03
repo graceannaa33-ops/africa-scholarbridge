@@ -1128,6 +1128,32 @@ def _init_db():
         if col not in existing_cols:
             _add_column(cur, "visa_requests", col, definition)
 
+    # Paystack (online payment of the same visa assistance fee). Extends the
+    # existing visa_payments table - one row per payment ATTEMPT. A row only
+    # unlocks anything when gateway_status = 'successful', which is set only
+    # after the server verified the transaction with Paystack.
+    existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(visa_payments)").fetchall()}
+    for col, definition in {
+        "gateway": "TEXT",                     # 'paystack' (NULL = manual M-PESA SMS flow)
+        "paystack_reference": "TEXT",          # our unique reference for this attempt
+        "gateway_status": "TEXT",              # pending / successful / failed / cancelled / abandoned
+        "gateway_method": "TEXT",              # 'mpesa_prompt' / 'checkout'
+        "gateway_message": "TEXT",             # Paystack gateway_response / display_text
+        "gateway_channel": "TEXT",             # e.g. mobile_money, card (from verify)
+        "expected_amount_subunit": "INTEGER",  # 150000 = KSh 1,500
+        "paid_amount_subunit": "INTEGER",      # amount Paystack reported
+        "paid_currency": "TEXT",
+        "gateway_paid_at": "TEXT",
+        "gateway_verified_at": "TEXT",
+        "payer_email": "TEXT",
+    }.items():
+        if col not in existing_cols:
+            _add_column(cur, "visa_payments", col, definition)
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS ux_visa_payments_paystack_reference
+        ON visa_payments(paystack_reference) WHERE paystack_reference IS NOT NULL
+    """)
+
     # Real, securely stored supporting documents. stored_file is a random
     # server-side name inside UPLOAD_ROOT/visa_application_documents/ (never
     # the student's filename, never a public URL). Rows without stored_file

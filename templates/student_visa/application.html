@@ -57,7 +57,7 @@
          style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
   </div>
   {% if form_first %}
-  <p class="small text-muted mb-4">Visa Form &rarr; Document Upload &rarr; Declaration &rarr; <span class="text-muted">Payment</span> &rarr; <span class="text-muted">Application Completed</span></p>
+  <p class="small text-muted mb-4">Visa Form &rarr; Document Upload &rarr; Payment &rarr; Additional Information &rarr; Declaration &rarr; Application Completed</p>
   {% else %}<div class="mb-4"></div>{% endif %}
 
   <div class="row justify-content-center">
@@ -106,9 +106,37 @@
               </li>
               {% endfor %}
             </ul>
+            {% if form_first %}
+              {% if documents_complete %}
+                <div class="alert alert-success" role="status" id="documentsComplete">
+                  <div>All required documents uploaded successfully.</div>
+                  <div class="fw-semibold">✓ Documents uploaded successfully</div>
+                </div>
+                <p class="fw-semibold mb-2">Next step: Visa Assistance Payment</p>
+                {% if paystack_enabled or r.payment_verified %}
+                  {% include 'student_visa/_paystack_payment.html' %}
+                {% else %}
+                  <div class="border border-success rounded p-3 mb-3" id="payment">
+                    <div class="d-flex justify-content-between flex-wrap gap-2 mb-2">
+                      <span>Visa assistance fee</span><strong>{{ format_price(r) }}</strong>
+                    </div>
+                    <a href="{{ url_for('student_visa_payment', request_id=r.id) }}" class="btn btn-success fw-semibold">Continue to M-PESA payment &rarr;</a>
+                  </div>
+                {% endif %}
+              {% else %}
+                <div class="alert alert-light border small" id="paymentNotYet">
+                  The Visa Assistance Payment opens here once
+                  {% if missing_fields %}sections
+                    {% for s in missing_fields|map(attribute=0)|unique %}<a href="{{ url_for('student_visa_step', request_id=r.id, step_name=s) }}">{{ step_titles[s] }}</a>{{ ', ' if not loop.last }}{% endfor %}
+                    are complete{% if missing_documents %} and {% endif %}{% endif %}{% if missing_documents %}your required documents are uploaded{% endif %}.
+                </div>
+              {% endif %}
+            {% endif %}
             <form method="POST" class="d-flex justify-content-between mt-4">
               <a href="{{ url_for('student_visa_step', request_id=r.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
+              {% if not form_first or r.payment_verified %}
               <button type="submit" class="btn btn-primary fw-semibold">Save &amp; Continue →</button>
+              {% endif %}
             </form>
 
           {% elif step_name == 'declaration' %}
@@ -152,7 +180,7 @@
               <div class="d-flex justify-content-between mt-4">
                 <a href="{{ url_for('student_visa_step', request_id=r.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
                 <button type="submit" class="btn btn-primary fw-semibold">
-                  {{ 'Submit Visa Form & Continue to Payment →' if form_first and not r.payment_verified else 'Submit Visa Application' }}
+                  Submit Visa Application
                 </button>
               </div>
             </form>

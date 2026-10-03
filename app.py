@@ -31,6 +31,7 @@ import visa as visa_lib
 import banks_lib
 import email_lib
 import mpesa_parser
+import paystack_lib
 from werkzeug.utils import secure_filename
 import visa_verification as visa_verify
 import capacity_monitor
@@ -121,6 +122,11 @@ class _AppRequest(app.request_class):
 
 
 app.request_class = _AppRequest
+
+# Render terminates HTTPS in front of gunicorn: trust ONLY its
+# X-Forwarded-Proto so external links (Paystack callback_url) use https.
+from werkzeug.middleware.proxy_fix import ProxyFix  # noqa: E402
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=0, x_proto=1, x_host=0, x_port=0, x_prefix=0)
 
 # Capacity monitoring: lightweight request counters + a background sampler
 # that e-mails the main admin as the service approaches its limits. It
@@ -667,6 +673,9 @@ def _visa_post_unlock_redirect(visa_request):
     - A visa request started the old way, directly from /student-visa,
       still goes to the full multi-step visa application as before.
     """
+    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
+        # Paid right after the documents: finish Additional Information + Declaration.
+        return redirect(url_for("student_visa_step", request_id=visa_request["id"], step_name="additional"))
     if visa_request["annual_application_id"]:
         app_row = g.db.execute("SELECT id, status FROM funding_applications WHERE id = ?",
                                (visa_request["annual_application_id"],)).fetchone()
@@ -790,15 +799,28 @@ def _verify_visa_payment(db, visa_request, method, provider_reference=None,
 
     # Keep the annual funding application's denormalised mirror in sync
     # (integrated flow - see README sections 16/17).
+    # A form-first request paid BEFORE its declaration (the current order:
+    # documents -> payment -> additional info -> declaration) is not complete
+    # yet - the funding application's visa step completes at the declaration.
+    awaiting_declaration = visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request)
     if visa_request["annual_application_id"]:
-        db.execute(
-            """UPDATE funding_applications
-               SET visa_payment_status='PAID', visa_step_status='COMPLETE', visa_assistance_approved=1,
-                   visa_status='NEEDS_ASSISTANCE', visa_assistance_status='COMPLETE',
-                   visa_reference=?, visa_request_id=?, last_updated=CURRENT_TIMESTAMP
-               WHERE id=?""",
-            (visa_request["request_number"], request_id, visa_request["annual_application_id"]),
-        )
+        if awaiting_declaration:
+            db.execute(
+                """UPDATE funding_applications
+                   SET visa_payment_status='PAID', visa_assistance_approved=1, visa_status='NEEDS_ASSISTANCE',
+                       visa_reference=?, visa_request_id=?, last_updated=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (visa_request["request_number"], request_id, visa_request["annual_application_id"]),
+            )
+        else:
+            db.execute(
+                """UPDATE funding_applications
+                   SET visa_payment_status='PAID', visa_step_status='COMPLETE', visa_assistance_approved=1,
+                       visa_status='NEEDS_ASSISTANCE', visa_assistance_status='COMPLETE',
+                       visa_reference=?, visa_request_id=?, last_updated=CURRENT_TIMESTAMP
+                   WHERE id=?""",
+                (visa_request["request_number"], request_id, visa_request["annual_application_id"]),
+            )
 
     student = db.execute("SELECT full_name FROM students WHERE id=?", (visa_request["student_id"],)).fetchone()
     db.execute(
@@ -813,16 +835,15 @@ def _verify_visa_payment(db, visa_request, method, provider_reference=None,
     # application is submitted (reference number, confirmation email,
     # matching) exactly as the student's own final submit would do.
     if visa_lib.form_is_first(visa_request) and visa_lib.form_submitted(visa_request):
-        visa_lib.start_processing_timeline(db, request_id, processing_days=14)
+        # Older order: declaration was signed before payment.
         add_notification(db, visa_request["student_id"],
                          "✅ Payment verified successfully. Your visa assistance application is now under review.")
-        app_row = (db.execute("SELECT * FROM funding_applications WHERE id = ?",
-                              (visa_request["annual_application_id"],)).fetchone()
-                   if visa_request["annual_application_id"] else None)
-        if app_row and app_row["status"] == "Draft" and _review_done(app_row):
-            db.execute("UPDATE funding_applications SET visa_assistance_status = 'COMPLETE' WHERE id = ?",
-                       (app_row["id"],))
-            _submit_funding_application(db, app_row["id"], visa_request["student_id"])
+        _complete_form_first_visa(db, visa_request)
+        return
+    if awaiting_declaration:
+        add_notification(db, visa_request["student_id"],
+                         "✅ Payment verified successfully. Please complete Additional Information and sign the "
+                         "declaration to finish your application.")
         return
     add_notification(db, visa_request["student_id"],
                      "✅ Payment verified successfully. You can now continue with your visa application.")
@@ -2221,6 +2242,13 @@ PAYMENT_STATUS_LABELS = {
 MPESA_CODE_PATTERN = re.compile(r"^[A-Z0-9]{10}$")
 
 
+def _visa_payment_ready(db, visa_request):
+    """Payment is offered only once the required documents are uploaded
+    (form-first requests) - see visa_lib.payment_ready."""
+    _ensure_visa_checklist(db, visa_request["id"])
+    return visa_lib.payment_ready(visa_request, _checklist_documents(db, visa_request["id"]))
+
+
 def _latest_visa_payment(db, request_id):
     return db.execute(
         "SELECT * FROM visa_payments WHERE request_id=? ORDER BY id DESC LIMIT 1", (request_id,)
@@ -2257,8 +2285,9 @@ def student_visa_payment(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
-    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
-        flash("Please complete the visa application form, documents and declaration before payment.", "warning")
+    if not _visa_payment_ready(db, visa_request):
+        flash("Please complete the visa application form and upload your required documents before payment.",
+              "warning")
         return redirect(url_for("student_visa_application", request_id=request_id))
     if visa_lib.is_unlocked(visa_request) and visa_request["annual_application_id"]:
         return _visa_post_unlock_redirect(visa_request)
@@ -2272,6 +2301,7 @@ def student_visa_payment(request_id):
         format_price=visa_lib.format_price,
         max_proof_mb=MAX_PAYMENT_PROOF_SIZE_BYTES // (1024 * 1024),
         max_message_length=mpesa_parser.MAX_MESSAGE_LENGTH,
+        **_paystack_context(db, visa_request, student),
     )
 
 
@@ -2286,7 +2316,7 @@ def student_visa_payment_parse(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         abort(404)
-    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
+    if not _visa_payment_ready(db, visa_request):
         abort(409)
     text = (request.form.get("mpesa_message") or "")[: mpesa_parser.MAX_MESSAGE_LENGTH * 2]
     parsed = mpesa_parser.parse_mpesa_message(text)
@@ -2305,10 +2335,15 @@ def student_visa_payment_submit(request_id):
     visa_request = get_visa_request_or_404(db, request_id, student)
     if not visa_request:
         return render_template("errors/404.html"), 404
-    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
-        flash("Please complete the visa application form, documents and declaration before payment.", "warning")
+    if not _visa_payment_ready(db, visa_request):
+        flash("Please complete the visa application form and upload your required documents before payment.",
+              "warning")
         return redirect(url_for("student_visa_application", request_id=request_id))
     back = redirect(url_for("student_visa_payment", request_id=request_id))
+    if paystack_lib.is_configured():
+        # Fallback only: with Paystack configured, payments go through Paystack.
+        flash("Please pay with Paystack (M-PESA) below.", "info")
+        return redirect(_paystack_page_url(visa_request))
 
     latest = _latest_visa_payment(db, request_id)
     if visa_lib.is_unlocked(visa_request) or (latest and latest["payment_status"] == "PAYMENT_VERIFIED"):
@@ -2474,6 +2509,293 @@ Africa ScholarBridge
 
 
 # ---------------------------------------------------------------------
+# 💳 PAYSTACK - online payment of the SAME visa assistance fee (M-PESA
+# prompt via the Charge API, or Paystack's hosted checkout). Used whenever
+# PAYSTACK_SECRET_KEY is set; otherwise the manual M-PESA SMS flow above is
+# shown instead. A Paystack row in visa_payments unlocks the service ONLY
+# after the server verified the transaction with Paystack
+# (_apply_paystack_result): status success + exact amount + KES + same
+# reference. Callback query strings, webhooks and the browser are never
+# trusted on their own.
+# ---------------------------------------------------------------------
+def _paystack_page_url(visa_request):
+    """Where the payment section lives: the Documents page (form-first,
+    right after the uploads) or the payment page (standalone/older)."""
+    if visa_lib.form_is_first(visa_request) and not visa_lib.form_submitted(visa_request):
+        return url_for("student_visa_step", request_id=visa_request["id"], step_name="documents") + "#payment"
+    return url_for("student_visa_payment", request_id=visa_request["id"])
+
+
+def _paystack_attempts(db, request_id):
+    return db.execute("SELECT * FROM visa_payments WHERE request_id = ? AND gateway = 'paystack' ORDER BY id DESC",
+                      (request_id,)).fetchall()
+
+
+def _paystack_context(db, visa_request, student):
+    attempts = _paystack_attempts(db, visa_request["id"])
+    verified = next((a for a in attempts if a["gateway_status"] == "successful"), None)
+    account = db.execute("SELECT email FROM users WHERE id = ?", (student["user_id"],)).fetchone()
+    fee = _visa_service_fee(db)
+    return {
+        "paystack_enabled": paystack_lib.is_configured(), "paystack_test_mode": paystack_lib.is_test_mode(),
+        "paystack_latest": attempts[0] if attempts else None, "paystack_verified": verified,
+        "paystack_fee": fee, "paystack_email": account["email"] if account else "",
+        "paystack_phone": student["phone"] or "", "paystack_labels": paystack_lib.GATEWAY_STATUS_LABELS,
+    }
+
+
+def _apply_paystack_result(db, payment, data):
+    """Applies a VERIFIED Paystack transaction (from paystack_lib.verify)
+    to one attempt. Idempotent. Returns the attempt's gateway_status."""
+    if (data.get("reference") or "") != payment["paystack_reference"]:
+        return payment["gateway_status"]
+    status = paystack_lib.gateway_status(data.get("status"))
+    message = str(data.get("gateway_response") or data.get("message") or "")[:300] or None
+    amount = data.get("amount")
+    currency = str(data.get("currency") or "").upper()
+    now = datetime.utcnow().isoformat(timespec="seconds")
+    if status == "successful" and (currency != paystack_lib.CURRENCY
+                                   or not isinstance(amount, (int, float))
+                                   or int(amount) != int(payment["expected_amount_subunit"] or -1)):
+        # Paid, but not exactly KSh 1,500 in KES: never unlocks; flagged for the Visa Admin.
+        db.execute(
+            """UPDATE visa_payments SET gateway_status='failed', payment_status='PAYMENT_REJECTED', status='failed',
+                      proof_status='Rejected', paid_amount_subunit=?, paid_currency=?, gateway_message=?,
+                      rejection_reason=?, gateway_verified_at=?, updated_at=CURRENT_TIMESTAMP
+               WHERE id=? AND gateway_status != 'successful'""",
+            (amount if isinstance(amount, (int, float)) else None, currency or None, message,
+             f"Paystack amount/currency mismatch: received {amount} {currency}, expected "
+             f"{payment['expected_amount_subunit']} {paystack_lib.CURRENCY}. Not accepted - check and refund if needed.",
+             now, payment["id"]))
+        db.execute("INSERT INTO visa_admin_notifications (request_id, message) VALUES (?, ?)",
+                   (payment["request_id"], f"⚠️ Paystack payment {payment['paystack_reference']} had the wrong "
+                                           f"amount/currency and was NOT accepted."))
+        db.commit()
+        return "failed"
+    if status != "successful":
+        if payment["gateway_status"] == "successful":
+            return "successful"                     # never downgrade a verified payment
+        rejected = status in ("failed", "abandoned", "cancelled")
+        db.execute(
+            """UPDATE visa_payments SET gateway_status=?, gateway_message=?, gateway_verified_at=?,
+                      payment_status=?, status=?, rejection_reason=?, updated_at=CURRENT_TIMESTAMP
+               WHERE id=? AND gateway_status != 'successful'""",
+            (status, message, now, "PAYMENT_REJECTED" if rejected else "PAYMENT_PENDING",
+             "failed" if rejected else "pending",
+             f"Paystack: {paystack_lib.GATEWAY_STATUS_LABELS.get(status, status)}" if rejected else None,
+             payment["id"]))
+        db.commit()
+        return status
+
+    # Successful: claim the row atomically - a second callback/webhook/check
+    # for the same reference finds it already 'successful' and stops here.
+    claimed = db.execute(
+        """UPDATE visa_payments SET gateway_status='successful', paid_amount_subunit=?, paid_currency=?,
+                  gateway_channel=?, gateway_paid_at=?, gateway_verified_at=?, gateway_message=?,
+                  submitted_amount=?, updated_at=CURRENT_TIMESTAMP
+           WHERE id=? AND gateway_status != 'successful'""",
+        (int(amount), currency, str(data.get("channel") or "")[:40] or None, str(data.get("paid_at") or "")[:40] or None,
+         now, message, int(amount) / 100.0, payment["id"])).rowcount
+    if claimed != 1:
+        db.commit()
+        return "successful"
+    visa_request = db.execute("SELECT * FROM visa_requests WHERE id = ?", (payment["request_id"],)).fetchone()
+    if visa_lib.is_unlocked(visa_request):
+        # Already paid by another attempt: record it, never unlock twice.
+        db.execute(
+            """UPDATE visa_payments SET payment_status='PAYMENT_VERIFIED', status='paid', verified=1, verified_at=?,
+                      verification_method='paystack_verify', admin_notes=COALESCE(admin_notes || ' ', '') || ?
+               WHERE id=?""",
+            (now, "DUPLICATE: this visa request was already paid - a refund may be due.", payment["id"]))
+        db.execute("INSERT INTO visa_admin_notifications (request_id, message) VALUES (?, ?)",
+                   (payment["request_id"], f"⚠️ Duplicate Paystack payment {payment['paystack_reference']} on an "
+                                           f"already-paid visa request - check whether a refund is due."))
+    else:
+        _verify_visa_payment(db, visa_request, method="Paystack (M-PESA)" if data.get("channel") == "mobile_money"
+                             else "Paystack", provider_reference=payment["paystack_reference"],
+                             payment_id=payment["id"], verification_method="paystack_verify")
+    db.commit()
+    return "successful"
+
+
+def _paystack_verify_attempt(db, payment):
+    """Asks Paystack for the real status of one attempt and applies it.
+    Returns the gateway_status, or None if Paystack couldn't be reached."""
+    try:
+        data = paystack_lib.verify(payment["paystack_reference"])
+    except paystack_lib.PaystackError as exc:
+        app.logger.warning("Paystack verify failed for %s: %s", payment["paystack_reference"], exc)
+        return None
+    return _apply_paystack_result(db, payment, data)
+
+
+def _paystack_recheck_pending(db, request_id):
+    """Before any new attempt: if an earlier attempt was actually paid,
+    find out now (prevents charging the student twice)."""
+    for p in _paystack_attempts(db, request_id):
+        if p["gateway_status"] == "pending":
+            _paystack_verify_attempt(db, p)
+
+
+@app.route("/student-visa/payment/<int:request_id>/paystack/start", methods=["POST"])
+@login_required
+def student_visa_paystack_start(request_id):
+    db = g.db
+    student = current_student()
+    visa_request = get_visa_request_or_404(db, request_id, student)
+    if not visa_request:
+        return render_template("errors/404.html"), 404
+    back = redirect(_paystack_page_url(visa_request))
+    if not paystack_lib.is_configured():
+        flash("Online payment is not available right now. Please use the M-PESA payment instructions.", "warning")
+        return redirect(url_for("student_visa_payment", request_id=request_id))
+    if not _visa_payment_ready(db, visa_request):
+        flash("Please complete the visa application form and upload your required documents before payment.",
+              "warning")
+        return redirect(url_for("student_visa_application", request_id=request_id))
+    _paystack_recheck_pending(db, request_id)
+    visa_request = db.execute("SELECT * FROM visa_requests WHERE id = ?", (request_id,)).fetchone()
+    if visa_lib.is_unlocked(visa_request):
+        flash("Payment already verified.", "info")
+        return back
+
+    method = request.form.get("method")
+    email = (request.form.get("email") or "").strip()[:200]
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        flash("Please enter a valid email address for your payment receipt.", "warning")
+        return back
+    phone = None
+    if method == "mpesa":
+        phone = paystack_lib.normalize_kenyan_phone(request.form.get("phone"))
+        if not phone:
+            flash("Please enter a valid Kenyan M-PESA number, e.g. 0712 345 678.", "warning")
+            return back
+    elif method != "checkout":
+        flash("Please choose a payment option.", "warning")
+        return back
+
+    fee = _visa_service_fee(db)                     # decided here, never by the browser
+    amount_subunit = paystack_lib.to_subunit(fee)
+    reference = paystack_lib.new_reference(request_id)
+    account = db.execute("SELECT email FROM users WHERE id=?", (student["user_id"],)).fetchone()
+    db.execute(
+        """INSERT INTO visa_payments (request_id, student_id, amount, currency, payment_method, gateway,
+               paystack_reference, transaction_reference, gateway_status, gateway_method, expected_amount,
+               expected_amount_subunit, phone_number, payer_email, student_name, student_email, student_phone,
+               payment_status, status, proof_status, verified, submitted_at)
+           VALUES (?, ?, ?, 'KES', 'Paystack', 'paystack', ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?,
+                   'PAYMENT_PENDING', 'pending', 'Pending Verification', 0, ?)""",
+        (request_id, student["id"], fee, reference, reference, "mpesa_prompt" if phone else "checkout", fee,
+         amount_subunit, phone, email, student["full_name"],
+         account["email"] if account else None, student["phone"], datetime.utcnow().isoformat(timespec="seconds")))
+    db.execute("UPDATE visa_requests SET payment_status='pending_verification', updated_at=CURRENT_TIMESTAMP "
+               "WHERE id=? AND payment_verified=0", (request_id,))
+    db.commit()
+    payment = db.execute("SELECT * FROM visa_payments WHERE paystack_reference = ?", (reference,)).fetchone()
+    metadata = {"visa_request_id": request_id, "request_number": visa_request["request_number"],
+                "purpose": "visa_assistance_fee"}
+    try:
+        if phone:
+            ps_status, text = paystack_lib.charge_mpesa(email, amount_subunit, reference, phone, metadata)
+            db.execute("UPDATE visa_payments SET gateway_message=? WHERE id=?", (text[:300] or None, payment["id"]))
+            db.commit()
+            if paystack_lib.gateway_status(ps_status) in ("successful", "failed"):
+                _paystack_verify_attempt(db, payment)
+            else:
+                flash("📱 Check your phone: an M-PESA prompt for KSh {:,.0f} has been sent. Enter your M-PESA PIN "
+                      "on your phone to pay, then click “Check payment status”.".format(fee), "info")
+            return back
+        checkout_url = paystack_lib.initialize_checkout(
+            email, amount_subunit, reference, url_for("paystack_callback", _external=True), metadata)
+        return redirect(checkout_url)
+    except paystack_lib.PaystackError as exc:
+        app.logger.warning("Paystack start failed for request %s: %s", request_id, exc)
+        db.execute("""UPDATE visa_payments SET gateway_status='failed', payment_status='PAYMENT_REJECTED',
+                      status='failed', rejection_reason='Payment could not be started with Paystack.',
+                      updated_at=CURRENT_TIMESTAMP WHERE id=? AND gateway_status='pending'""", (payment["id"],))
+        db.commit()
+        flash("We couldn't start the payment with Paystack right now. Nothing was charged - please try again "
+              "in a moment.", "danger")
+        return back
+
+
+@app.route("/student-visa/payment/<int:request_id>/paystack/check", methods=["POST"])
+@login_required
+def student_visa_paystack_check(request_id):
+    """'Check payment status' - asks Paystack directly (server-side)."""
+    db = g.db
+    student = current_student()
+    visa_request = get_visa_request_or_404(db, request_id, student)
+    if not visa_request:
+        return render_template("errors/404.html"), 404
+    if paystack_lib.is_configured():
+        _paystack_recheck_pending(db, request_id)
+    visa_request = db.execute("SELECT * FROM visa_requests WHERE id = ?", (request_id,)).fetchone()
+    latest = (_paystack_attempts(db, request_id) or [None])[0]
+    if visa_lib.is_unlocked(visa_request):
+        flash("✅ Payment verified.", "success")
+        return _visa_post_unlock_redirect(visa_request)
+    if latest is not None and latest["gateway_status"] == "pending":
+        flash("⏳ Your payment is still being processed. If you have entered your M-PESA PIN, wait a moment "
+              "and check again.", "info")
+    elif latest is not None:
+        flash("Your payment was not completed. You have not been charged for an unsuccessful payment - you can "
+              "try again.", "warning")
+    return redirect(_paystack_page_url(visa_request))
+
+
+@app.route("/paystack/callback")
+@login_required
+def paystack_callback():
+    """Paystack sends the browser back here. The query string only tells us
+    WHICH attempt to check - the result always comes from Paystack."""
+    db = g.db
+    student = current_student()
+    reference = (request.args.get("reference") or request.args.get("trxref") or "").strip()[:100]
+    payment = db.execute(
+        "SELECT * FROM visa_payments WHERE paystack_reference = ? AND student_id = ? AND gateway = 'paystack'",
+        (reference, student["id"])).fetchone() if reference else None
+    if not payment:
+        flash("We could not find that payment.", "warning")
+        return redirect(url_for("student_visa_dashboard"))
+    outcome = _paystack_verify_attempt(db, payment) if paystack_lib.is_configured() else None
+    visa_request = db.execute("SELECT * FROM visa_requests WHERE id = ?", (payment["request_id"],)).fetchone()
+    if visa_lib.is_unlocked(visa_request):
+        flash("✅ Payment verified. Thank you!", "success")
+        return _visa_post_unlock_redirect(visa_request)
+    if outcome is None or outcome == "pending":
+        flash("⏳ Your payment is still being processed. Use “Check payment status” in a moment.", "info")
+    else:
+        flash("Your payment was not completed, so nothing was unlocked. You can try again.", "warning")
+    return redirect(_paystack_page_url(visa_request))
+
+
+@app.route("/paystack/webhook", methods=["POST"])
+def paystack_webhook():
+    """Paystack server-to-server events. Signature-checked (HMAC-SHA512 of
+    the raw body with the secret key); a charge.success event is then
+    RE-VERIFIED with Paystack before anything changes. Idempotent."""
+    if not paystack_lib.is_configured():
+        return "", 404
+    raw = request.get_data(cache=False, as_text=False)
+    if not paystack_lib.valid_signature(raw, request.headers.get("x-paystack-signature")):
+        return "", 401
+    try:
+        event = json.loads(raw.decode("utf-8") or "{}")
+    except ValueError:
+        return "", 400
+    if event.get("event") == "charge.success":
+        reference = str(((event.get("data") or {}).get("reference")) or "")[:100]
+        db = g.db
+        payment = db.execute("SELECT * FROM visa_payments WHERE paystack_reference = ? AND gateway = 'paystack'",
+                             (reference,)).fetchone() if reference else None
+        if payment is not None and payment["gateway_status"] != "successful":
+            if _paystack_verify_attempt(db, payment) is None:
+                return "", 503                      # Paystack retries later
+    return "", 200
+
+
+# ---------------------------------------------------------------------
 # 🇺🇸 VISA ASSISTANCE APPLICATION FORM (12 sections, visa_lib).
 #
 # Two orders, ONE form:
@@ -2535,12 +2857,31 @@ def _clean_form_value(field, raw):
     return value
 
 
+def _complete_form_first_visa(db, visa_request):
+    """Form, documents, payment and declaration are all done: start the visa
+    review and submit the annual funding application (reference number,
+    confirmation email, matching) as the student's own final submit would."""
+    request_id = visa_request["id"]
+    visa_lib.start_processing_timeline(db, request_id, processing_days=14)
+    if not visa_request["annual_application_id"]:
+        return
+    db.execute(
+        """UPDATE funding_applications
+           SET visa_step_status='COMPLETE', visa_assistance_status='COMPLETE', visa_payment_status='PAID',
+               visa_assistance_approved=1, visa_status='NEEDS_ASSISTANCE', last_updated=CURRENT_TIMESTAMP
+           WHERE id=?""", (visa_request["annual_application_id"],))
+    app_row = db.execute("SELECT * FROM funding_applications WHERE id = ?",
+                         (visa_request["annual_application_id"],)).fetchone()
+    if app_row and app_row["status"] == "Draft" and _review_done(app_row):
+        _submit_funding_application(db, app_row["id"], visa_request["student_id"])
+
+
 def _visa_form_editable(visa_request):
     """Can the student fill in / change the visa application form now?"""
     if visa_lib.form_is_first(visa_request):
-        if not visa_lib.is_unlocked(visa_request):
-            return not visa_lib.form_submitted(visa_request)
-        return visa_request["application_status"] == "information_required"
+        if not visa_lib.form_submitted(visa_request):
+            return True              # before payment: sections 1-10; after: 11-12 too
+        return visa_lib.is_unlocked(visa_request) and visa_request["application_status"] == "information_required"
     return (visa_lib.can_continue_application(visa_request)
             and visa_request["application_status"] in ("application_unlocked", "information_required"))
 
@@ -2607,6 +2948,19 @@ def student_visa_step(request_id, step_name):
     if step_name not in visa_lib.VISA_APPLICATION_STEPS:
         return render_template("errors/404.html"), 404
     step_index = visa_lib.VISA_APPLICATION_STEPS.index(step_name)
+    docs_index = visa_lib.VISA_APPLICATION_STEPS.index("documents")
+    paid = visa_lib.is_unlocked(visa_request)
+
+    # Form-first order: ... -> 10. Documents -> PAYMENT -> 11. Additional
+    # Information -> 12. Declaration. Nothing after the documents is
+    # reachable until the payment has been verified.
+    if visa_lib.form_is_first(visa_request) and not paid and step_index > docs_index:
+        flash("Please complete the Visa Assistance Payment on the Documents page first.", "warning")
+        return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+    if (visa_lib.form_is_first(visa_request) and not paid and step_name == "documents"
+            and request.method == "POST"):
+        flash("Upload your required documents and complete the Visa Assistance Payment to continue.", "warning")
+        return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
 
     if request.method == "POST" and step_name != "declaration":
         form = request.form
@@ -2655,6 +3009,8 @@ def student_visa_step(request_id, step_name):
         allowed_doc_extensions=sorted(ALLOWED_SUPPORT_DOC_EXTENSIONS),
         max_doc_mb=MAX_SUPPORT_DOC_SIZE_BYTES // (1024 * 1024),
         today=datetime.utcnow().date().isoformat(), format_price=visa_lib.format_price,
+        documents_complete=visa_lib.documents_complete(visa_request, documents),
+        **(_paystack_context(db, visa_request, student) if step_name == "documents" else {}),
     )
 
 
@@ -2788,6 +3144,9 @@ def student_visa_submit(request_id):
         return _visa_form_redirect(visa_request)
     if request.method == "GET":
         return redirect(url_for("student_visa_step", request_id=request_id, step_name="declaration"))
+    if visa_lib.form_is_first(visa_request) and not visa_lib.is_unlocked(visa_request):
+        flash("Please complete the Visa Assistance Payment on the Documents page first.", "warning")
+        return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
 
     declaration_step = redirect(url_for("student_visa_step", request_id=request_id, step_name="declaration"))
     missing = visa_lib.missing_required_fields(visa_request)
@@ -2822,15 +3181,25 @@ def student_visa_submit(request_id):
                   form_submitted_at = COALESCE(form_submitted_at, ?), updated_at = CURRENT_TIMESTAMP
            WHERE id = ?""", (typed_name[:200], today, now, request_id))
 
-    if visa_lib.form_is_first(visa_request) and not visa_lib.is_unlocked(visa_request):
+    if visa_lib.form_is_first(visa_request) and visa_request["application_status"] != "information_required":
+        # Documents, payment (verified) and declaration are all done.
         visa_lib.add_visa_history(db, request_id, "form_submitted",
-                                  "Visa application form, documents and declaration submitted. Awaiting payment.")
+                                  "Visa application form, documents, payment and declaration completed.")
         add_notification(db, student["id"],
-                         f"🇺🇸 Your visa application form {visa_request['request_number']} was submitted. "
-                         f"Final step: the visa assistance service fee.")
+                         f"🇺🇸 Your visa assistance application {visa_request['request_number']} has been submitted "
+                         f"and is now under review.")
+        _complete_form_first_visa(db, db.execute("SELECT * FROM visa_requests WHERE id = ?",
+                                                 (request_id,)).fetchone())
         db.commit()
-        flash("✅ Visa application form submitted. Final step: pay the visa assistance service fee.", "success")
-        return redirect(url_for("student_visa_payment", request_id=request_id))
+        flash("✅ Your visa assistance application has been submitted.", "success")
+        app_row = (db.execute("SELECT id, status FROM funding_applications WHERE id = ?",
+                              (visa_request["annual_application_id"],)).fetchone()
+                   if visa_request["annual_application_id"] else None)
+        if app_row and app_row["status"] != "Draft":
+            return redirect(url_for("application_confirmation", application_id=app_row["id"]))
+        if app_row:
+            return redirect(url_for("application_step", step_name="visa"))
+        return redirect(url_for("student_visa_dashboard"))
 
     # Payment already verified (pay-first order, or more information
     # requested by the Visa Admin): processing starts / resumes now.
@@ -2997,6 +3366,7 @@ def _main_admin_visa_summary(db, application):
     else:
         had_visa = "Not answered yet"
     payment_status, amount, reference, paid_date = "Not required", None, None, None
+    shown = None
     if vr is not None:
         if visa_lib.is_unlocked(vr):
             payment_status = "Paid"
@@ -3017,7 +3387,17 @@ def _main_admin_visa_summary(db, application):
             except ValueError:
                 paid_date = str(when)[:10]
     visa_status = visa_lib.visa_display_status(application, vr, latest)
+    shown_row = shown
+    transaction_status = None
+    if shown_row is not None:
+        transaction_status = (paystack_lib.GATEWAY_STATUS_LABELS.get(shown_row["gateway_status"], shown_row["gateway_status"])
+                              if shown_row["gateway"] == "paystack"
+                              else PAYMENT_STATUS_LABELS.get(shown_row["payment_status"], shown_row["payment_status"]))
     return {
+        "payment_currency": "KES" if vr is not None else None,
+        "payment_method": (("Paystack" if shown_row["gateway"] == "paystack" else "M-PESA (manual)")
+                           if shown_row is not None else None),
+        "transaction_status": transaction_status,
         "visa_status": visa_status, "had_visa": had_visa,
         "visa_application": ("Submitted" if vr is not None and visa_lib.form_submitted(vr)
                              else "Not submitted" if vr is not None else "—"),
@@ -4103,9 +4483,29 @@ def visa_admin_payment_detail(payment_id):
         "visa_admin/payment_detail.html", payment=payment, flags=_payment_flags(payment),
         student_side=student_side, incoming_side=incoming_side, comparison=comparison,
         student_parsed=student_parsed, manual_review_message=mpesa_parser.MANUAL_REVIEW_MESSAGE,
+        paystack_labels=paystack_lib.GATEWAY_STATUS_LABELS,
         other_submissions=other_submissions, status_labels=PAYMENT_STATUS_LABELS,
         mpesa_receiving_number=_visa_payment_recipient(db), visa_fee=_visa_service_fee(db),
     )
+
+
+@app.route("/visa-admin/payments/<int:payment_id>/paystack-recheck", methods=["POST"])
+@visa_admin_required
+def visa_admin_paystack_recheck(payment_id):
+    """Asks Paystack for the current status of one attempt (Visa Admin)."""
+    db = g.db
+    payment = db.execute("SELECT * FROM visa_payments WHERE id=? AND gateway='paystack'", (payment_id,)).fetchone()
+    if not payment:
+        return render_template("errors/404.html"), 404
+    if not paystack_lib.is_configured():
+        flash("Paystack is not configured on this server.", "warning")
+    else:
+        outcome = _paystack_verify_attempt(db, payment)
+        if outcome is None:
+            flash("Could not reach Paystack. Try again in a moment.", "danger")
+        else:
+            flash(f"Paystack says: {paystack_lib.GATEWAY_STATUS_LABELS.get(outcome, outcome)}.", "info")
+    return redirect(url_for("visa_admin_payment_detail", payment_id=payment_id))
 
 
 @app.route("/visa-admin/payment-proof/<int:payment_id>/review", methods=["POST"])
@@ -4127,6 +4527,10 @@ def visa_admin_payment_proof_review(payment_id):
         return back
 
     action = request.form.get("action")
+    if payment["gateway"] == "paystack" and action in ("verify", "approve"):
+        # Online payments are confirmed ONLY by Paystack (server-side verify).
+        flash("Paystack payments can't be verified by hand - use “Re-check with Paystack”.", "warning")
+        return back
     admin_notes = (request.form.get("admin_notes") or "").strip()[:2000] or None
     if action in ("verify", "approve"):
         if request.form.get("confirm_received") != "yes":

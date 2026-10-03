@@ -255,6 +255,22 @@ def missing_required_documents(visa_request, documents):
     return [n for n in required_document_types(visa_request) if n not in uploaded]
 
 
+def documents_complete(visa_request, documents):
+    """Sections 1-9 complete AND every required document uploaded - the
+    point at which payment is offered for form-first requests."""
+    return not missing_required_fields(visa_request) and not missing_required_documents(visa_request, documents)
+
+
+def payment_ready(visa_request, documents):
+    """May this request be paid for now?
+      * standalone (pay-first) requests: always;
+      * older form-first requests whose declaration is already signed: yes;
+      * form-first requests: only after documents_complete()."""
+    if not form_is_first(visa_request) or form_submitted(visa_request):
+        return True
+    return documents_complete(visa_request, documents)
+
+
 VISA_DISPLAY_STATUSES = ["Not Required Yet", "Visa Already Provided", "Visa Assistance Required",
                          "Visa Form Submitted", "Awaiting Payment", "Paid", "Under Review", "Completed"]
 _REVIEW_STAGES = {"preparation", "application_review", "fee_coverage_processing", "interview_preparation",
@@ -275,10 +291,10 @@ def visa_display_status(application, visa_request=None, latest_payment=None):
         return "Under Review"
     if is_unlocked(visa_request):
         return "Paid"
+    if latest_payment is not None and latest_payment["payment_status"] == "PAYMENT_PENDING":
+        return "Awaiting Payment"          # payment started / proof submitted, not yet confirmed
     if form_is_first(visa_request) and not form_submitted(visa_request):
         return "Visa Assistance Required"
-    if latest_payment is not None and latest_payment["payment_status"] == "PAYMENT_PENDING":
-        return "Awaiting Payment"          # proof submitted, waiting for admin confirmation
     return "Visa Form Submitted" if form_is_first(visa_request) else "Visa Assistance Required"
 
 

@@ -15,3 +15,4 @@ uploads/visa_documents/*
 database/*.db
 vendor/*/*.egg-info/
 vendor/*/build/
+.venv311/

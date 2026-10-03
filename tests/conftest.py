@@ -311,8 +311,11 @@ def upload_visa_support_doc(client, request_id, doc_type, data=None, filename="d
 
 
 def complete_visa_form(client, request_id, sign=True):
-    """Fill all 12 sections, upload the required documents and (optionally)
-    sign the declaration of a form-first visa assistance request."""
+    """Sections 1-9 + the required documents of a form-first visa
+    assistance request: the point where payment opens. (Additional
+    Information and the Declaration come AFTER payment - see
+    finish_visa_form; `sign` is kept for older callers and only signs if
+    the request has already been paid.)"""
     for step, answers in VISA_FORM_ANSWERS.items():
         r = client.post(f"/student-visa/application/{request_id}/step/{step}", data=answers)
         assert r.status_code == 302, (step, r.status_code)
@@ -321,6 +324,13 @@ def complete_visa_form(client, request_id, sign=True):
     if sign:
         return client.post(f"/student-visa/application/{request_id}/submit",
                            data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
+
+
+def finish_visa_form(client, request_id):
+    """After a verified payment: 11. Additional Information + 12. Declaration."""
+    client.post(f"/student-visa/application/{request_id}/step/additional", data=VISA_FORM_ANSWERS["additional"])
+    return client.post(f"/student-visa/application/{request_id}/submit",
+                       data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
 
 
 

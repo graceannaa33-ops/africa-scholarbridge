@@ -15,7 +15,7 @@
           {% if visa_request.form_first %}
           <p class="small mb-4" id="formFirstSteps">
             <span class="text-success">✓ Visa Form</span> &rarr; <span class="text-success">✓ Documents</span> &rarr;
-            <span class="text-success">✓ Declaration</span> &rarr; <strong>Payment</strong> &rarr; <span class="text-muted">Application Completed</span>
+            <strong>Payment</strong> &rarr; <span class="text-muted">Additional Information &rarr; Declaration &rarr; Application Completed</span>
           </p>
           {% else %}<div class="mb-4"></div>{% endif %}
 
@@ -26,6 +26,8 @@
               <p class="mb-3">Payment verified successfully. You can now continue with your visa application.</p>
               <a href="{{ continue_url }}" class="btn btn-success fw-semibold">Continue to Visa Application &rarr;</a>
             </div>
+          {% elif paystack_enabled or (payment and payment.gateway == 'paystack') %}
+            {# Paystack status is shown in the payment section below #}
           {% elif status == 'PAYMENT_PENDING' %}
             <div class="alert alert-warning" role="status">
               <h5 class="fw-bold mb-1">⏳ Payment Status: Pending Verification</h5>
@@ -44,7 +46,11 @@
             </div>
           {% endif %}
 
-          {% if not unlocked %}
+          {% if not unlocked and paystack_enabled %}
+            {% include 'student_visa/_paystack_payment.html' %}
+          {% endif %}
+
+          {% if not unlocked and not paystack_enabled %}
           {# ---------------- 1. Fee + number ---------------- #}
           <section class="mb-4">
             <div class="border rounded p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -149,6 +155,7 @@
           {% endif %}
           {% endif %}{# not unlocked #}
 
+          {% if not paystack_enabled %}
           <div class="alert alert-light border small mb-0">
             <strong>How verification works:</strong> this is a direct payment to a phone number, so the website
             cannot confirm it with Safaricom automatically. A pasted SMS or screenshot is <em>not</em> proof of
@@ -156,6 +163,7 @@
             M-PESA account before your visa application is unlocked. Your screenshot is only visible to
             authorised Visa Admin staff.
           </div>
+          {% endif %}
         </div>
       </div>
     </div>

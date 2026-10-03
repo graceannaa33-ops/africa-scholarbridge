@@ -44,6 +44,29 @@
         {% else %}
           <p class="small text-muted">No SMS text submitted{{ ' — screenshot only. The transaction code below was TYPED by the student.' if payment.code_source == 'manual' else '.' }}</p>
         {% endif %}
+        {% if payment.gateway == 'paystack' %}
+        <div class="border rounded p-2 mb-3" id="paystackDetails">
+          <h6 class="fw-bold small mb-2">Paystack payment</h6>
+          <table class="table table-sm small mb-2">
+            <tr><th style="width:40%">Application ID</th><td class="font-monospace">{{ payment.request_number }}</td></tr>
+            <tr><th>Student</th><td>{{ payment.student_name_display }}</td></tr>
+            <tr><th>Payment status</th><td>{{ status_labels.get(payment.payment_status, payment.payment_status) }}</td></tr>
+            <tr><th>Transaction status</th><td>{{ paystack_labels.get(payment.gateway_status, payment.gateway_status) }}</td></tr>
+            <tr><th>Amount (expected)</th><td>KSh {{ '{:,.0f}'.format((payment.expected_amount_subunit or 0) / 100) }}</td></tr>
+            <tr><th>Amount (paid, from Paystack)</th><td>{{ 'KSh {:,.2f}'.format(payment.paid_amount_subunit / 100) if payment.paid_amount_subunit is not none else '—' }}</td></tr>
+            <tr><th>Currency</th><td>{{ payment.paid_currency or 'KES' }}</td></tr>
+            <tr><th>Paystack reference</th><td class="font-monospace text-break">{{ payment.paystack_reference }}</td></tr>
+            <tr><th>Method / channel</th><td>{{ 'M-PESA prompt' if payment.gateway_method == 'mpesa_prompt' else 'Paystack checkout' }}{% if payment.gateway_channel %} · {{ payment.gateway_channel }}{% endif %}</td></tr>
+            <tr><th>Payment date</th><td>{{ payment.gateway_paid_at or '—' }}</td></tr>
+            <tr><th>Last checked with Paystack</th><td>{{ payment.gateway_verified_at or '—' }}</td></tr>
+            <tr><th>Paystack message</th><td>{{ payment.gateway_message or '—' }}</td></tr>
+          </table>
+          <form method="POST" action="{{ url_for('visa_admin_paystack_recheck', payment_id=payment.id) }}">
+            <button type="submit" class="btn btn-sm btn-outline-primary">Re-check with Paystack</button>
+          </form>
+          <p class="small text-muted mt-2 mb-0">Paystack payments are confirmed automatically by the server with Paystack; they can't be verified by hand.</p>
+        </div>
+        {% endif %}
         {% if student_parsed %}
           {% if student_parsed.looks_like_mpesa %}
           <div class="alert alert-success small py-2 mb-2" id="parseStatus">
@@ -164,7 +187,7 @@
         </form>
       </div></div>
 
-      {% if pending %}
+      {% if pending and payment.gateway != 'paystack' %}
       <div class="card border-success mb-3"><div class="card-body">
         <h5 class="fw-bold mb-2">Verify</h5>
         <form method="POST" action="{{ url_for('visa_admin_payment_proof_review', payment_id=payment.id) }}">

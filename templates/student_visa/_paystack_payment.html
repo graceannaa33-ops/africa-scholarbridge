@@ -1,0 +1,70 @@
+{# Visa Assistance Payment via Paystack. Needs: visa_request + the paystack_* context from app._paystack_context.
+   No API key is ever rendered here - all Paystack calls happen on the server. #}
+{% set fee_text = "KSh {:,.0f}".format(paystack_fee) %}
+<section id="payment" class="border border-success rounded p-3 p-md-4 mb-3">
+  {% if visa_request.payment_verified %}
+    <div class="alert alert-success mb-0" role="status" id="paymentVerified">
+      <h5 class="fw-bold mb-2">✓ Payment verified</h5>
+      {% if paystack_verified %}
+      <div>Amount paid: <strong>KSh {{ "{:,.0f}".format((paystack_verified.paid_amount_subunit or 0) / 100) }}</strong></div>
+      <div class="text-break">Reference: <span class="font-monospace">{{ paystack_verified.paystack_reference }}</span></div>
+      {% else %}
+      <div>Your visa assistance payment has been verified.</div>
+      {% endif %}
+    </div>
+  {% else %}
+    <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+      <h5 class="fw-bold mb-0">Visa Assistance Payment</h5>
+      {% if paystack_test_mode %}<span class="badge bg-warning text-dark">Test mode</span>{% endif %}
+    </div>
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 border rounded bg-light p-3 mb-3">
+      <span>Visa assistance fee</span><strong class="fs-4" id="paystackFee">{{ fee_text }}</strong>
+    </div>
+    <p class="small mb-3">Payment method: <strong>M-PESA / Paystack</strong>. Pay securely with Paystack - you can
+      pay with M-PESA. Your M-PESA PIN is entered only on your phone; Africa ScholarBridge never sees or stores it.</p>
+
+    {% if paystack_latest and paystack_latest.gateway_status == 'pending' %}
+      <div class="alert alert-info" role="status" id="paymentPending">
+        <strong>⏳ Payment is being processed.</strong>
+        {% if paystack_latest.gateway_method == 'mpesa_prompt' %}
+          Check your phone for the M-PESA prompt and enter your PIN. {% if paystack_latest.gateway_message %}<span class="d-block small mt-1">{{ paystack_latest.gateway_message }}</span>{% endif %}
+        {% else %}
+          If you completed the payment on Paystack, it will be confirmed shortly.
+        {% endif %}
+        <form method="POST" action="{{ url_for('student_visa_paystack_check', request_id=visa_request.id) }}" class="mt-2">
+          <button type="submit" class="btn btn-sm btn-primary">Check payment status</button>
+        </form>
+      </div>
+    {% elif paystack_latest and paystack_latest.gateway_status in ('failed', 'abandoned', 'cancelled') %}
+      <div class="alert alert-warning" role="status" id="paymentNotCompleted">
+        Your last payment attempt was not completed ({{ paystack_labels.get(paystack_latest.gateway_status, paystack_latest.gateway_status) }}).
+        Your documents are kept - you can try again below.
+      </div>
+    {% endif %}
+
+    <form method="POST" action="{{ url_for('student_visa_paystack_start', request_id=visa_request.id) }}" id="paystackForm">
+      <div class="row g-2 mb-3">
+        <div class="col-12 col-md-6">
+          <label for="paystackEmail" class="form-label small fw-semibold">Email (for your receipt)</label>
+          <input type="email" id="paystackEmail" name="email" class="form-control" value="{{ paystack_email }}" maxlength="200" required>
+        </div>
+        <div class="col-12 col-md-6">
+          <label for="paystackPhone" class="form-label small fw-semibold">M-PESA phone number</label>
+          <input type="tel" id="paystackPhone" name="phone" class="form-control" value="{{ paystack_phone }}"
+                 placeholder="0712 345 678" inputmode="tel" maxlength="20" autocomplete="tel">
+          <div class="form-text">Kenyan number, e.g. 0712 345 678 or +254 712 345 678.</div>
+        </div>
+      </div>
+      <div class="d-grid gap-2">
+        <button type="submit" name="method" value="mpesa" class="btn btn-success btn-lg fw-semibold">
+          Pay {{ fee_text }} with Paystack (M-PESA)
+        </button>
+        <button type="submit" name="method" value="checkout" class="btn btn-outline-secondary" formnovalidate>
+          Or pay on Paystack's secure checkout page
+        </button>
+      </div>
+      <p class="small text-muted mt-2 mb-0">Your application is marked as paid only after Paystack confirms the
+        payment to our server. Paying does not guarantee visa approval.</p>
+    </form>
+  {% endif %}
+</section>
