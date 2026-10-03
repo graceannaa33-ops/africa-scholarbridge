@@ -49,13 +49,13 @@
       <div class="row g-2 mb-3">
         <div class="col-12 col-md-6">
           <label for="paystackEmail" class="form-label small fw-semibold">Email (for your receipt)</label>
-          <input type="email" id="paystackEmail" name="email" class="form-control" value="{{ paystack_email }}" maxlength="200" required>
+          <input type="email" id="paystackEmail" name="email" class="form-control" value="{{ paystack_email }}" maxlength="200" placeholder="e.g. alex.test@example.com" required>
         </div>
         <div class="col-12 col-md-6">
           <label for="paystackPhone" class="form-label small fw-semibold">M-PESA phone number</label>
           <input type="tel" id="paystackPhone" name="phone" class="form-control" value="{{ paystack_phone }}"
-                 placeholder="0712 345 678" inputmode="tel" maxlength="20" autocomplete="tel">
-          <div class="form-text">Kenyan number, e.g. 0712 345 678 or +254 712 345 678.</div>
+                 placeholder="e.g. +254 700 000 001" inputmode="tel" maxlength="20" autocomplete="tel">
+          <div class="form-text">Kenyan number, e.g. 0700 000 001 or +254 700 000 001.</div>
         </div>
       </div>
       <div class="d-grid gap-2">

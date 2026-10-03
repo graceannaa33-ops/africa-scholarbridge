@@ -57,6 +57,7 @@
                 <input type="file" name="visa_document" id="visaDocumentInput" class="form-control"
                        accept=".pdf,.jpg,.jpeg,.png" required>
                 <div class="form-text">
+                  Example: Upload a clear copy of your visa page.
                   Accepted formats: {{ allowed_visa_doc_extensions|join(', ')|upper }}. Maximum size: {{ max_visa_doc_mb }} MB.
                 </div>
               </div>
@@ -72,27 +73,31 @@
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
                   <label class="form-label">Visa type / category <span class="text-danger">*</span></label>
-                  <input type="text" name="visa_type_category" class="form-control" placeholder="F-1, J-1 or M-1"
+                  <input type="text" name="visa_type_category" class="form-control" placeholder="e.g. F-1"
                          value="{{ application.visa_document_type or '' }}" maxlength="30" required>
+                  <div class="form-text">F-1, J-1 or M-1, as printed on your visa.</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Passport number <span class="text-danger">*</span></label>
-                  <input type="text" name="passport_number" class="form-control" placeholder="As shown on your passport"
+                  <input type="text" name="passport_number" class="form-control" placeholder="e.g. TESTP123456"
                          value="{{ application.visa_document_passport_number or '' }}" maxlength="20" required>
+                  <div class="form-text">As shown on your passport.</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Visa issue date <span class="text-danger">*</span></label>
                   <input type="date" name="visa_issue_date" class="form-control"
                          value="{{ application.visa_document_issue_date or '' }}" required>
+                  <div class="form-text">Example: 01/01/2025</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Visa expiry date <span class="text-danger">*</span></label>
                   <input type="date" name="visa_expiry_date" class="form-control"
                          value="{{ application.visa_document_expiry_date or '' }}" required>
+                  <div class="form-text">Example: 01/01/2030</div>
                 </div>
                 <div class="col-12">
                   <label class="form-label">Additional information <span class="text-muted small">(optional)</span></label>
-                  <textarea name="additional_info" class="form-control" rows="2" placeholder="Anything else Africa ScholarBridge should know">{{ application.visa_document_notes or '' }}</textarea>
+                  <textarea name="additional_info" class="form-control" rows="2" placeholder="e.g. Anything else Africa ScholarBridge should know about your visa">{{ application.visa_document_notes or '' }}</textarea>
                 </div>
               </div>
 

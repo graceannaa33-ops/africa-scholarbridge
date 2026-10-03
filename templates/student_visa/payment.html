@@ -91,17 +91,17 @@
               <textarea id="mpesaMessage" name="mpesa_message" class="form-control font-monospace" rows="5"
                         maxlength="{{ max_message_length }}"
                         placeholder="Paste your M-PESA confirmation SMS here..."></textarea>
-              <div class="form-text">Paste the full message you received after sending the money — it starts with a 10-character code such as <code>UIR1N8OV43 Confirmed.</code></div>
+              <div class="form-text">Paste the full message you received after sending the money — it starts with a 10-character code such as <code>TESTABC123 Confirmed.</code> (example)</div>
             </section>
 
             <section class="mb-4">
               <h5 class="fw-bold mb-2">Upload Screenshot <span class="text-muted fw-normal small">(optional if you pasted the SMS)</span></h5>
               <input type="file" name="payment_proof" id="paymentProof" class="form-control" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">
-              <div class="form-text">JPG, PNG or WEBP, up to {{ max_proof_mb }} MB.</div>
+              <div class="form-text">Example: Upload a screenshot of your M-PESA confirmation message. Accepted formats: JPG, PNG, WEBP. Maximum size: {{ max_proof_mb }} MB.</div>
               <img id="proofPreview" alt="Screenshot preview" class="img-fluid rounded border mt-2 d-none" style="max-height: 280px;">
               <div id="manualCodeBox" class="mt-3 d-none">
                 <label for="manualCode" class="form-label">M-PESA transaction code shown on your screenshot <span class="text-danger">*</span></label>
-                <input type="text" id="manualCode" name="transaction_reference" class="form-control text-uppercase font-monospace" maxlength="10" placeholder="e.g. UIR1N8OV43" autocomplete="off">
+                <input type="text" id="manualCode" name="transaction_reference" class="form-control text-uppercase font-monospace" maxlength="10" placeholder="e.g. TESTABC123" autocomplete="off">
                 <div class="form-text">Only needed when you upload a screenshot without pasting the SMS.</div>
               </div>
             </section>
@@ -125,9 +125,9 @@
 
             <section class="mb-4">
               <label for="payerPhone" class="form-label">Phone number you paid from <span class="text-muted small">(optional — helps us find your payment)</span></label>
-              <input type="tel" id="payerPhone" name="payment_phone" class="form-control" maxlength="20" placeholder="07XXXXXXXX">
+              <input type="tel" id="payerPhone" name="payment_phone" class="form-control" maxlength="20" placeholder="e.g. +254 700 000 001">
               <label for="comment" class="form-label mt-3">Additional comment <span class="text-muted small">(optional)</span></label>
-              <textarea id="comment" name="additional_comment" class="form-control" rows="2" maxlength="500"></textarea>
+              <textarea id="comment" name="additional_comment" class="form-control" rows="2" maxlength="500" placeholder="e.g. I paid from a family member's phone"></textarea>
             </section>
 
             <section class="mb-3">

@@ -9,8 +9,8 @@
       <div class="card asb-card shadow-sm">
         <div class="card-body p-4">
           <form method="POST">
-            <div class="mb-3"><label class="form-label">Name</label><input type="text" name="name" class="form-control" required></div>
-            <div class="mb-3"><label class="form-label">Email</label><input type="email" name="email" class="form-control" required></div>
+            <div class="mb-3"><label class="form-label">Name</label><input type="text" name="name" class="form-control" placeholder="e.g. Alex Testperson" required></div>
+            <div class="mb-3"><label class="form-label">Email</label><input type="email" name="email" class="form-control" placeholder="e.g. alex.test@example.com" required></div>
             <div class="mb-3">
               <label class="form-label">Category</label>
               <select name="category" class="form-select">
@@ -21,9 +21,10 @@
                 <option>Scam Report</option>
                 <option>Partnership Inquiry</option>
               </select>
+              <div class="form-text">Choose the topic that best matches your message.</div>
             </div>
-            <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject" class="form-control"></div>
-            <div class="mb-3"><label class="form-label">Message</label><textarea name="message" class="form-control" rows="4" required></textarea></div>
+            <div class="mb-3"><label class="form-label">Subject</label><input type="text" name="subject" class="form-control" placeholder="e.g. Question about scholarships"></div>
+            <div class="mb-3"><label class="form-label">Message</label><textarea name="message" class="form-control" rows="4" placeholder="e.g. I would like more information about the funding opportunities..." required></textarea></div>
             <button type="submit" class="btn btn-primary w-100 fw-semibold">Send Message</button>
           </form>
         </div>

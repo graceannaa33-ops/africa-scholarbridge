@@ -15,47 +15,50 @@
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Personal Information</h4>
               <div class="row g-3">
                 <div class="col-md-6"><label class="form-label">Full Name</label>
-                  <input type="text" name="full_name" class="form-control" value="{{ application.full_name or '' }}" required></div>
+                  <input type="text" name="full_name" class="form-control" value="{{ application.full_name or '' }}" placeholder="e.g. Alex Testperson" required></div>
                 <div class="col-md-6"><label class="form-label">Date of Birth</label>
-                  <input type="date" name="date_of_birth" class="form-control" value="{{ application.date_of_birth or '' }}"></div>
+                  <input type="date" name="date_of_birth" class="form-control" value="{{ application.date_of_birth or '' }}">
+                  <div class="form-text">Example: 01/01/2000</div></div>
                 <div class="col-md-6"><label class="form-label">Country</label>
-                  <input type="text" name="country" class="form-control" value="{{ application.country or '' }}" required></div>
+                  <input type="text" name="country" class="form-control" value="{{ application.country or '' }}" placeholder="e.g. Exampleland" required></div>
                 <div class="col-md-6"><label class="form-label">Citizenship</label>
-                  <input type="text" name="citizenship" class="form-control" value="{{ application.citizenship or '' }}"></div>
+                  <input type="text" name="citizenship" class="form-control" value="{{ application.citizenship or '' }}" placeholder="e.g. Exampleland"></div>
                 <div class="col-md-6"><label class="form-label">Phone</label>
-                  <input type="text" name="phone" class="form-control" value="{{ application.phone or '' }}"></div>
+                  <input type="text" name="phone" class="form-control" value="{{ application.phone or '' }}" placeholder="e.g. +254 700 000 001"></div>
                 <div class="col-md-6"><label class="form-label">Email</label>
-                  <input type="email" name="email" class="form-control" value="{{ application.email or '' }}" required></div>
+                  <input type="email" name="email" class="form-control" value="{{ application.email or '' }}" placeholder="e.g. alex.test@example.com" required></div>
                 <div class="col-md-6"><label class="form-label">Gender (optional)</label>
                   <select name="gender" class="form-select">
                     <option value="" {{ 'selected' if not application.gender }}>Prefer not to say</option>
                     <option {{ 'selected' if application.gender == 'Female' }}>Female</option>
                     <option {{ 'selected' if application.gender == 'Male' }}>Male</option>
                     <option {{ 'selected' if application.gender == 'Other' }}>Other</option>
-                  </select></div>
+                  </select>
+                  <div class="form-text">Select your gender, or leave “Prefer not to say”.</div></div>
               </div>
 
             {% elif step_name == 'education' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Education</h4>
               <div class="row g-3">
                 <div class="col-md-6"><label class="form-label">Institution</label>
-                  <input type="text" name="institution" class="form-control" value="{{ application.institution or '' }}"></div>
+                  <input type="text" name="institution" class="form-control" value="{{ application.institution or '' }}" placeholder="e.g. Example University"></div>
                 <div class="col-md-6"><label class="form-label">Education Level</label>
                   <select name="education_level" class="form-select">
                     {% for lvl in ['Undergraduate', "Master's", 'PhD', 'Vocational/Technical', 'High School'] %}
                     <option {{ 'selected' if application.education_level == lvl }}>{{ lvl }}</option>
                     {% endfor %}
-                  </select></div>
+                  </select>
+                  <div class="form-text">Select the level you are currently studying at.</div></div>
                 <div class="col-md-6"><label class="form-label">Course</label>
-                  <input type="text" name="course" class="form-control" value="{{ application.course or '' }}"></div>
+                  <input type="text" name="course" class="form-control" value="{{ application.course or '' }}" placeholder="e.g. Bachelor of Information Technology"></div>
                 <div class="col-md-6"><label class="form-label">Field of Study</label>
-                  <input type="text" name="field_of_study" class="form-control" value="{{ application.field_of_study or '' }}"></div>
+                  <input type="text" name="field_of_study" class="form-control" value="{{ application.field_of_study or '' }}" placeholder="e.g. Information Technology"></div>
                 <div class="col-md-6"><label class="form-label">Year of Study</label>
-                  <input type="text" name="year_of_study" class="form-control" value="{{ application.year_of_study or '' }}"></div>
+                  <input type="text" name="year_of_study" class="form-control" value="{{ application.year_of_study or '' }}" placeholder="e.g. 1st Year"></div>
                 <div class="col-md-6"><label class="form-label">Expected Graduation Year</label>
-                  <input type="text" name="graduation_year" class="form-control" value="{{ application.graduation_year or '' }}"></div>
+                  <input type="text" name="graduation_year" class="form-control" value="{{ application.graduation_year or '' }}" placeholder="e.g. 2030"></div>
                 <div class="col-12"><label class="form-label">Additional Academic Information</label>
-                  <textarea name="academic_info" class="form-control" rows="2">{{ application.academic_info or '' }}</textarea></div>
+                  <textarea name="academic_info" class="form-control" rows="2" placeholder="e.g. Completed a programming project">{{ application.academic_info or '' }}</textarea></div>
               </div>
 
             {% elif step_name == 'funding_need' %}
@@ -75,20 +78,20 @@
                 </div>
                 {% endfor %}
                 <div class="col-12"><label class="form-label">Other Education Expenses</label>
-                  <textarea name="other_expenses" class="form-control" rows="2">{{ application.other_expenses or '' }}</textarea></div>
+                  <textarea name="other_expenses" class="form-control" rows="2" placeholder="e.g. Laptop for coursework, examination fees">{{ application.other_expenses or '' }}</textarea></div>
               </div>
 
             {% elif step_name == 'financial' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Financial Information</h4>
               <div class="row g-3">
                 <div class="col-12"><label class="form-label">Household Financial Situation</label>
-                  <textarea name="household_situation" class="form-control" rows="2">{{ application.household_situation or '' }}</textarea></div>
+                  <textarea name="household_situation" class="form-control" rows="2" placeholder="e.g. Household monthly income about KSh 25,000 (KSh 300,000 a year); expected education cost KSh 100,000">{{ application.household_situation or '' }}</textarea></div>
                 <div class="col-md-6"><label class="form-label">Source of Support</label>
-                  <input type="text" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}"></div>
+                  <input type="text" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}" placeholder="e.g. Parent/guardian, part-time work"></div>
                 <div class="col-md-6"><label class="form-label">Estimated Financial Need</label>
-                  <input type="text" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. USD 3,000 / year"></div>
+                  <input type="text" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. KSh 75,000"></div>
                 <div class="col-12"><label class="form-label">Funding Already Received (if any)</label>
-                  <textarea name="funding_already_received" class="form-control" rows="2">{{ application.funding_already_received or '' }}</textarea></div>
+                  <textarea name="funding_already_received" class="form-control" rows="2" placeholder="e.g. Example Scholars Program — KSh 50,000">{{ application.funding_already_received or '' }}</textarea></div>
               </div>
 
             {% elif step_name == 'preferences' %}
@@ -112,7 +115,7 @@
             {% elif step_name == 'statement' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Personal Statement</h4>
               <p class="text-muted">Tell us about your educational goals, financial need, career goals, and why funding matters to you and your community.</p>
-              <textarea name="personal_statement" class="form-control" rows="10" placeholder="Write your personal statement here...">{{ application.personal_statement or '' }}</textarea>
+              <textarea name="personal_statement" class="form-control" rows="10" placeholder="e.g. Explain your educational goals and why you need funding. Career goal: Software Developer...">{{ application.personal_statement or '' }}</textarea>
 
             {% elif step_name == 'documents' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>

@@ -2,10 +2,21 @@
 {% block title %}USA Student Visa Assistance — Visa Application Form — Africa ScholarBridge{% endblock %}
 {% block content %}
 {% set r = visa_request %}
-{% macro text(field, label, type="text", required=False, placeholder="", maxlength=200) -%}
+{# Upload guidance shown under each supporting-document field (instructional only). #}
+{% set doc_examples = {
+  "Valid Passport": "Example: Upload a clear copy of your passport",
+  "Passport-size Photograph": "Example: Upload a recent passport-size photograph",
+  "National ID": "Example: Upload a clear copy of your identification document",
+  "Bank Statement / Proof of Funds": "Example: Upload your bank statement if required",
+  "Admission Letter": "Example: Upload your admission letter",
+  "Invitation Letter": "Example: Upload the invitation letter you received",
+  "Sponsorship Letter": "Example: Upload the letter from your sponsor",
+} %}
+{% macro text(field, label, type="text", required=False, placeholder="", maxlength=200, hint="") -%}
   <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
   <input type="{{ type }}" id="f_{{ field }}" name="{{ field }}" class="form-control" value="{{ visa_request[field] or '' }}"
          {% if type != 'date' %}maxlength="{{ maxlength }}"{% endif %} placeholder="{{ placeholder }}" {{ 'required' if required }}>
+  {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
 {%- endmacro %}
 {% macro area(field, label, rows=3, required=False, placeholder="") -%}
   <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
@@ -16,7 +27,7 @@
   <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
   {% set current = visa_request[field] or default %}
   <select id="f_{{ field }}" name="{{ field }}" class="form-select" {{ 'required' if required }}>
-    <option value="" {{ 'selected' if not current }}>— Select —</option>
+    <option value="" {{ 'selected' if not current }}>Select an option</option>
     {% for opt in options %}<option {{ 'selected' if current == opt }}>{{ opt }}</option>{% endfor %}
   </select>
 {%- endmacro %}
@@ -103,6 +114,8 @@
                   <input type="file" name="document" class="form-control form-control-sm" style="max-width: 320px;" accept=".pdf,.jpg,.jpeg,.png" required>
                   <button type="submit" class="btn btn-sm btn-outline-primary">{{ 'Replace' if d.stored_file else 'Upload' }}</button>
                 </form>
+                <div class="form-text">{{ doc_examples.get(d.document_type, 'Example: Upload a clear copy of this document') }}.
+                  Accepted formats: {{ allowed_doc_extensions|join(', ')|upper }}. Maximum size: {{ max_doc_mb }} MB.</div>
               </li>
               {% endfor %}
             </ul>
@@ -163,7 +176,7 @@
                 <div class="col-md-7">
                   <label class="form-label" for="declaration_name">Applicant Full Name <span class="text-danger">*</span></label>
                   <input type="text" id="declaration_name" name="declaration_name" class="form-control" maxlength="200" required
-                         placeholder="{{ r.full_name or '' }}" autocomplete="off">
+                         placeholder="{{ r.full_name or 'e.g. Alex Testperson' }}" autocomplete="off">
                   <div class="form-text">Type your full name exactly as in section 1 — this is your signature.</div>
                 </div>
                 <div class="col-md-5">
@@ -190,24 +203,24 @@
             {% if step_name == 'personal' %}
               <h4 class="fw-bold mb-3">1. Applicant Personal Information</h4>
               <div class="row g-3">
-                <div class="col-md-6">{{ text('full_name', 'Full Name', required=True) }}</div>
-                <div class="col-md-6">{{ text('date_of_birth', 'Date of Birth', type='date', required=True) }}</div>
+                <div class="col-md-6">{{ text('full_name', 'Full Name', required=True, placeholder='e.g. Alex Testperson') }}</div>
+                <div class="col-md-6">{{ text('date_of_birth', 'Date of Birth', type='date', required=True, hint='Example: 01/01/2000') }}</div>
                 <div class="col-md-6">{{ radios('gender', 'Gender', v.GENDERS, required=True) }}</div>
-                <div class="col-md-6">{{ text('citizenship', 'Nationality', required=True) }}</div>
-                <div class="col-md-6">{{ text('country_of_residence', 'Country of Residence', required=True) }}</div>
-                <div class="col-md-6">{{ text('national_id_number', 'National ID Number', maxlength=40) }}</div>
+                <div class="col-md-6">{{ text('citizenship', 'Nationality', required=True, placeholder='e.g. Exampleland') }}</div>
+                <div class="col-md-6">{{ text('country_of_residence', 'Country of Residence', required=True, placeholder='e.g. Exampleland') }}</div>
+                <div class="col-md-6">{{ text('national_id_number', 'National ID Number', maxlength=40, placeholder='e.g. TEST-ID-001') }}</div>
                 <div class="col-md-6">{{ select('marital_status', 'Marital Status', v.MARITAL_STATUSES) }}</div>
               </div>
 
             {% elif step_name == 'contact' %}
               <h4 class="fw-bold mb-3">2. Contact Information</h4>
               <div class="row g-3">
-                <div class="col-md-6">{{ text('email', 'Email Address', type='email', required=True) }}</div>
-                <div class="col-md-6">{{ text('phone', 'Phone Number', required=True, maxlength=30) }}</div>
-                <div class="col-md-6">{{ text('alt_phone', 'Alternative Phone Number', maxlength=30) }}</div>
-                <div class="col-md-6">{{ text('city', 'City/Town') }}</div>
-                <div class="col-12">{{ area('current_address', 'Current Address', rows=2) }}</div>
-                <div class="col-md-6">{{ text('contact_country', 'Country') }}</div>
+                <div class="col-md-6">{{ text('email', 'Email Address', type='email', required=True, placeholder='e.g. alex.test@example.com') }}</div>
+                <div class="col-md-6">{{ text('phone', 'Phone Number', required=True, maxlength=30, placeholder='e.g. +254 700 000 001') }}</div>
+                <div class="col-md-6">{{ text('alt_phone', 'Alternative Phone Number', maxlength=30, placeholder='e.g. +254 700 000 002') }}</div>
+                <div class="col-md-6">{{ text('city', 'City/Town', placeholder='e.g. Exampletown') }}</div>
+                <div class="col-12">{{ area('current_address', 'Current Address', rows=2, placeholder='e.g. 123 Example Street, Exampletown') }}</div>
+                <div class="col-md-6">{{ text('contact_country', 'Country', placeholder='e.g. Exampleland') }}</div>
               </div>
 
             {% elif step_name == 'passport' %}
@@ -215,39 +228,39 @@
               <div class="mb-3">{{ radios('passport_status', 'Passport', v.PASSPORT_STATUSES, required=True) }}</div>
               <p class="small text-muted">Fill in the details below if you have a valid passport.</p>
               <div class="row g-3">
-                <div class="col-md-6">{{ text('passport_number', 'Passport Number', maxlength=20) }}</div>
+                <div class="col-md-6">{{ text('passport_number', 'Passport Number', maxlength=20, placeholder='e.g. TESTP123456') }}</div>
                 <div class="col-md-6">{{ select('passport_type', 'Passport Type', v.PASSPORT_TYPES) }}</div>
-                <div class="col-md-6">{{ text('passport_issue_date', 'Date of Issue', type='date') }}</div>
-                <div class="col-md-6">{{ text('passport_expiry_date', 'Date of Expiry', type='date') }}</div>
-                <div class="col-md-6">{{ text('passport_place_of_issue', 'Place of Issue') }}</div>
-                <div class="col-md-6">{{ text('passport_issuing_country', 'Issuing Country') }}</div>
+                <div class="col-md-6">{{ text('passport_issue_date', 'Date of Issue', type='date', hint='Example: 01/01/2025') }}</div>
+                <div class="col-md-6">{{ text('passport_expiry_date', 'Date of Expiry', type='date', hint='Example: 01/01/2030') }}</div>
+                <div class="col-md-6">{{ text('passport_place_of_issue', 'Place of Issue', placeholder='e.g. Exampletown') }}</div>
+                <div class="col-md-6">{{ text('passport_issuing_country', 'Issuing Country', placeholder='e.g. Exampleland') }}</div>
               </div>
 
             {% elif step_name == 'visa_info' %}
               <h4 class="fw-bold mb-3">4. Visa Information</h4>
               <div class="alert alert-light border small">For Africa ScholarBridge study funding this is usually a <strong>Student Visa</strong> for the <strong>United States of America</strong>.</div>
               <div class="row g-3">
-                <div class="col-md-6">{{ text('destination_country', 'Country You Want to Visit', required=True) }}</div>
+                <div class="col-md-6">{{ text('destination_country', 'Country You Want to Visit', required=True, placeholder='e.g. Example Country') }}</div>
                 <div class="col-md-6">{{ select('visa_category', 'Visa Type', v.VISA_TYPES, required=True, default=v.DEFAULT_VISA_TYPE) }}</div>
-                <div class="col-12">{{ area('purpose_of_travel', 'Purpose of Travel', rows=2, required=True) }}</div>
-                <div class="col-md-4">{{ text('intended_arrival_date', 'Intended Date of Arrival', type='date') }}</div>
-                <div class="col-md-4">{{ text('intended_departure_date', 'Intended Date of Departure', type='date') }}</div>
+                <div class="col-12">{{ area('purpose_of_travel', 'Purpose of Travel', rows=2, required=True, placeholder='e.g. Educational studies') }}</div>
+                <div class="col-md-4">{{ text('intended_arrival_date', 'Intended Date of Arrival', type='date', hint='Example: 01/09/2027') }}</div>
+                <div class="col-md-4">{{ text('intended_departure_date', 'Intended Date of Departure', type='date', hint='Example: 01/06/2031') }}</div>
                 <div class="col-md-4">{{ text('expected_length_of_stay', 'Expected Length of Stay', placeholder='e.g. 4 years') }}</div>
               </div>
               <details class="mt-4" {{ 'open' if r.us_institution or r.program }}>
                 <summary class="fw-semibold">U.S. study details (optional)</summary>
                 <div class="row g-3 mt-1">
-                  <div class="col-md-6">{{ text('us_institution', 'U.S. Institution') }}</div>
-                  <div class="col-md-6">{{ text('program', 'Program') }}</div>
-                  <div class="col-md-6">{{ text('degree', 'Degree') }}</div>
-                  <div class="col-md-6">{{ text('intended_start_date', 'Intended Start Date', type='date') }}</div>
+                  <div class="col-md-6">{{ text('us_institution', 'U.S. Institution', placeholder='e.g. Example University') }}</div>
+                  <div class="col-md-6">{{ text('program', 'Program', placeholder='e.g. Bachelor of Information Technology') }}</div>
+                  <div class="col-md-6">{{ text('degree', 'Degree', placeholder='e.g. Bachelor of Science') }}</div>
+                  <div class="col-md-6">{{ text('intended_start_date', 'Intended Start Date', type='date', hint='Example: 01/09/2027') }}</div>
                   <div class="col-md-6">{{ text('admission_status', 'Admission Status', placeholder='e.g. Admitted, Applied') }}</div>
-                  <div class="col-md-6">{{ text('i20_status', 'I-20 Status') }}</div>
-                  <div class="col-md-6">{{ text('ds160_status', 'DS-160 Status') }}</div>
+                  <div class="col-md-6">{{ text('i20_status', 'I-20 Status', placeholder='e.g. Received') }}</div>
+                  <div class="col-md-6">{{ text('ds160_status', 'DS-160 Status', placeholder='e.g. Not started') }}</div>
                   <div class="col-md-6">{{ text('sevis_info', 'SEVIS Information', placeholder='SEVIS ID, if available') }}</div>
-                  <div class="col-md-6">{{ text('interview_status', 'Interview Status') }}</div>
-                  <div class="col-md-6">{{ text('application_type', 'Application Type') }}</div>
-                  <div class="col-md-6">{{ text('previous_us_visa', 'Previous U.S. Visa') }}</div>
+                  <div class="col-md-6">{{ text('interview_status', 'Interview Status', placeholder='e.g. Not yet scheduled') }}</div>
+                  <div class="col-md-6">{{ text('application_type', 'Application Type', placeholder='e.g. New application') }}</div>
+                  <div class="col-md-6">{{ text('previous_us_visa', 'Previous U.S. Visa', placeholder='e.g. None') }}</div>
                 </div>
               </details>
 
@@ -255,11 +268,11 @@
               <h4 class="fw-bold mb-3">5. Education / Employment Information</h4>
               <div class="row g-3">
                 <div class="col-md-6">{{ select('current_status', 'Current Status', v.CURRENT_STATUSES, required=True) }}</div>
-                <div class="col-md-6">{{ text('education_level', 'Education Level') }}</div>
-                <div class="col-md-6">{{ text('organization_name', 'School/University/Employer/Business Name') }}</div>
-                <div class="col-md-6">{{ text('position_course', 'Position/Course') }}</div>
-                <div class="col-12">{{ area('organization_address', 'Address', rows=2) }}</div>
-                <div class="col-md-6">{{ text('organization_contact', 'Phone/Email') }}</div>
+                <div class="col-md-6">{{ text('education_level', 'Education Level', placeholder='e.g. Undergraduate') }}</div>
+                <div class="col-md-6">{{ text('organization_name', 'School/University/Employer/Business Name', placeholder='e.g. Example University') }}</div>
+                <div class="col-md-6">{{ text('position_course', 'Position/Course', placeholder='e.g. Bachelor of Information Technology') }}</div>
+                <div class="col-12">{{ area('organization_address', 'Address', rows=2, placeholder='e.g. 123 Example Street, Exampletown') }}</div>
+                <div class="col-md-6">{{ text('organization_contact', 'Phone/Email', placeholder='e.g. info@example.com') }}</div>
               </div>
 
             {% elif step_name == 'financial' %}
@@ -274,20 +287,20 @@
               <h4 class="fw-bold mb-3">7. Accommodation Information</h4>
               <div class="row g-3">
                 <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay?', v.ACCOMMODATION_TYPES, required=True) }}</div>
-                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation') }}</div>
-                <div class="col-12">{{ area('accommodation_address', 'Address', rows=2) }}</div>
-                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email') }}</div>
+                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation', placeholder='e.g. Example Student Residence') }}</div>
+                <div class="col-12">{{ area('accommodation_address', 'Address', rows=2, placeholder='e.g. 123 Example Street, Exampletown') }}</div>
+                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email', placeholder='e.g. housing@example.com') }}</div>
               </div>
 
             {% elif step_name == 'travel_history' %}
               <h4 class="fw-bold mb-3">8. Travel History</h4>
               <div class="mb-2">{{ radios('travelled_before', 'Have you travelled outside your country before?', v.YES_NO, required=True) }}</div>
-              <div class="mb-4">{{ area('countries_visited', 'If Yes: Country/Countries Visited', rows=2) }}</div>
+              <div class="mb-4">{{ area('countries_visited', 'If Yes: Country/Countries Visited', rows=2, placeholder='e.g. Exampleland, Example Country') }}</div>
               <div class="mb-2">{{ radios('previous_application', 'Have you previously applied for a visa to your intended destination?', v.YES_NO, required=True) }}</div>
               <div class="row g-3">
-                <div class="col-md-6">{{ text('previous_application_date', 'If Yes: Date of Previous Application', type='date') }}</div>
+                <div class="col-md-6">{{ text('previous_application_date', 'If Yes: Date of Previous Application', type='date', hint='Example: 01/01/2024') }}</div>
                 <div class="col-md-6">{{ select('previous_visa_approved', 'Was the visa approved?', v.YES_NO) }}</div>
-                <div class="col-12">{{ area('previous_refusal_explanation', 'If refused, briefly explain', rows=2) }}</div>
+                <div class="col-12">{{ area('previous_refusal_explanation', 'If refused, briefly explain', rows=2, placeholder='e.g. Briefly describe the reason you were given') }}</div>
               </div>
 
             {% elif step_name == 'legal' %}
@@ -296,12 +309,12 @@
                                           ('refused_entry', 'refused_entry_explanation', 'Have you ever been refused entry into another country?'),
                                           ('visa_refused', 'visa_refused_explanation', 'Have you ever had a visa application refused?')] %}
               <div class="mb-1">{{ radios(q, label, v.YES_NO, required=True) }}</div>
-              <div class="mb-4">{{ area(field, 'If Yes, please explain', rows=2) }}</div>
+              <div class="mb-4">{{ area(field, 'If Yes, please explain', rows=2, placeholder='e.g. Briefly explain what happened and when') }}</div>
               {% endfor %}
 
             {% elif step_name == 'additional' %}
               <h4 class="fw-bold mb-3">11. Additional Information</h4>
-              <div class="mb-3">{{ area('additional_information', 'Is there anything else you would like us to know about your application?', rows=6) }}</div>
+              <div class="mb-3">{{ area('additional_information', 'Is there anything else you would like us to know about your application?', rows=6, placeholder='e.g. Sponsoring organization: Example Education Foundation (sponsor: Alex Testperson). Invitation letter: Example organization invitation...') }}</div>
               <div class="form-label fw-semibold">What would you like Africa ScholarBridge to help with? (optional)</div>
               {{ checks('assistance_required', v.ASSISTANCE_OPTIONS) }}
             {% endif %}

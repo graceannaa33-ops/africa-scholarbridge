@@ -98,17 +98,18 @@
                   <input class="form-check-input" type="checkbox" id="bankNotListed">
                   <label class="form-check-label small" for="bankNotListed">My bank is not listed</label>
                 </div>
-                <input type="text" name="manual_bank_name" id="manualBankName" class="form-control mt-2" placeholder="Enter your bank's name" style="display:none;">
+                <input type="text" name="manual_bank_name" id="manualBankName" class="form-control mt-2" placeholder="e.g. Example Bank" style="display:none;">
               </div>
 
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
                   <label class="form-label">Account Holder Name</label>
-                  <input type="text" name="account_holder_name" class="form-control" placeholder="Exactly as it appears on your account">
+                  <input type="text" name="account_holder_name" class="form-control" placeholder="e.g. Alex Testperson">
+                  <div class="form-text">Exactly as it appears on your account.</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Account Number</label>
-                  <input type="text" name="account_number" class="form-control" autocomplete="off">
+                  <input type="text" name="account_number" class="form-control" autocomplete="off" placeholder="e.g. TEST-ACCOUNT-001">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Account Type</label>
@@ -118,23 +119,23 @@
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Branch <span class="text-muted small">(optional)</span></label>
-                  <input type="text" name="branch" class="form-control">
+                  <input type="text" name="branch" class="form-control" placeholder="e.g. Exampletown Branch">
                 </div>
                 <div class="col-md-6" id="bankCodeField" style="display:none;">
                   <label class="form-label">Bank Code / SWIFT / BIC</label>
-                  <input type="text" name="bank_code" class="form-control" placeholder="Bank code">
+                  <input type="text" name="bank_code" class="form-control" placeholder="e.g. TEST-CODE-01">
                 </div>
                 <div class="col-md-6" id="swiftField" style="display:none;">
                   <label class="form-label">SWIFT / BIC</label>
-                  <input type="text" name="swift_bic" class="form-control">
+                  <input type="text" name="swift_bic" class="form-control" placeholder="e.g. TESTXXXX">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">IBAN <span class="text-muted small">(if applicable)</span></label>
-                  <input type="text" name="iban" class="form-control">
+                  <input type="text" name="iban" class="form-control" placeholder="e.g. XX00 TEST 0000 0000 0001">
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Routing Number <span class="text-muted small">(if applicable)</span></label>
-                  <input type="text" name="routing_number" class="form-control">
+                  <input type="text" name="routing_number" class="form-control" placeholder="e.g. 000000000">
                 </div>
               </div>
 
@@ -147,7 +148,7 @@
                   </div>
                   <div class="col-md-6">
                     <label class="form-label small">Mobile Money Number</label>
-                    <input type="text" name="mobile_money_number" class="form-control">
+                    <input type="text" name="mobile_money_number" class="form-control" placeholder="e.g. +254 700 000 001">
                   </div>
                 </div>
               </div>
