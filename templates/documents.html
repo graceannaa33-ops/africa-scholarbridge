@@ -7,31 +7,39 @@
 
   <div class="card asb-card shadow-sm">
     <div class="card-body">
-      <table class="table align-middle">
-        <thead><tr><th>Document</th><th>Type</th><th>Status</th><th></th></tr></thead>
-        <tbody>
+      <div class="row g-3">
         {% for d in documents %}
-          <tr>
-            <td>{{ d.document_type }}</td>
-            <td>{% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}</td>
-            <td>
-              <span class="badge {{ 'bg-success' if d.status == 'Verified' else 'bg-primary' if d.status == 'Uploaded' else 'bg-warning text-dark' }}">{{ d.status }}</span>
-            </td>
-            <td>
-              {% if d.status == 'Missing' %}
-              <form method="POST">
-                <input type="hidden" name="document_id" value="{{ d.id }}">
-                <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-upload"></i> Upload</button>
-              </form>
+        <div class="col-12">
+          <div class="border rounded p-3">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+              <strong>{{ d.document_type }}</strong>
+              {% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}
+            </div>
+            {% if d.is_required %}
+              <div class="mt-2"><span class="badge {{ 'bg-success' if d.status != 'Missing' else 'bg-warning text-dark' }}">{{ 'Uploaded' if d.status != 'Missing' else 'Missing' }}</span></div>
+            {% else %}
+              <div class="form-label fw-semibold mt-2">Do you have this document?</div>
+              {% if d.availability == 'Yes' %}
+                <span class="badge bg-success">Yes, I have it</span>
+              {% elif d.availability == 'No' %}
+                <span class="badge bg-secondary">No, I don't have it</span>
               {% else %}
-              <span class="text-muted small">{{ d.uploaded_at }}</span>
+                <span class="badge bg-warning text-dark">Please choose Yes or No</span>
               {% endif %}
-            </td>
-          </tr>
+            {% endif %}
+            {% if d.status == 'Missing' and (d.is_required or d.availability == 'Yes') %}
+            <form method="POST" class="mt-2">
+              <input type="hidden" name="document_id" value="{{ d.id }}">
+              <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
+            </form>
+            {% elif d.status != 'Missing' %}
+              <div class="text-muted small mt-2">Uploaded {{ d.uploaded_at }}</div>
+            {% endif %}
+          </div>
+        </div>
         {% endfor %}
-        </tbody>
-      </table>
-      <p class="small text-muted mb-0">Note: this demo simulates uploads without storing real files. In production, uploads would be securely stored and scanned before review.</p>
+      </div>
+      <p class="small text-muted mb-0">Documents are handled through the authenticated application flow. Required documents must be uploaded; optional documents can be declined by selecting No.</p>
     </div>
   </div>
 </div>
