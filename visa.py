@@ -183,7 +183,7 @@ ASSISTANCE_OPTIONS = ["DS-160 Guidance", "Document Preparation", "Application Re
 VISA_DOCUMENT_CHECKLIST = [
     ("Valid Passport", False),
     ("Passport-size Photograph", True),
-    ("National ID", False),
+    ("National ID", True),
     ("Bank Statement / Proof of Funds", False),
     ("Flight Itinerary / Travel Reservation", False),
     ("Accommodation Booking", False),
@@ -238,21 +238,33 @@ def required_document_rules():
 
 
 def required_document_types(visa_request):
-    """The document types this applicant must upload, per the policy above."""
-    rules = required_document_rules()
-    needed = []
-    if "photo" in rules:
-        needed.append("Passport-size Photograph")
-    if "identity" in rules:
-        has_passport = (visa_request["passport_status"] or "") == "I have a valid passport"
-        needed.append("Valid Passport" if has_passport else "National ID")
-    return needed
+    """The two visa-assistance documents that are always required."""
+    return [document_type for document_type, required in VISA_DOCUMENT_CHECKLIST if required]
 
 
 def missing_required_documents(visa_request, documents):
-    """Required document types (see required_document_types) not uploaded yet."""
+    """Required document types not uploaded yet."""
     uploaded = {d["document_type"] for d in documents if d["stored_file"]}
     return [n for n in required_document_types(visa_request) if n not in uploaded]
+
+
+def missing_selected_documents(visa_request, documents):
+    """Documents that block the next step after the applicant has answered
+    every optional Yes/No question.
+
+    Required documents must always be uploaded. Optional documents only
+    become required when the applicant explicitly selects Yes.
+    """
+    missing = []
+    for d in documents:
+        if d["is_required"]:
+            if not d["stored_file"]:
+                missing.append(f"{d['document_type']} (required)")
+        elif (d["availability"] or "").lower() == "yes" and not d["stored_file"]:
+            missing.append(f"{d['document_type']} (you selected Yes)")
+        elif not d["availability"]:
+            missing.append(f"{d['document_type']} (please choose Yes or No)")
+    return missing
 
 
 def documents_complete(visa_request, documents):
