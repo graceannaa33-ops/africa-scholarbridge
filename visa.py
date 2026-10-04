@@ -268,9 +268,10 @@ def missing_selected_documents(visa_request, documents):
 
 
 def documents_complete(visa_request, documents):
-    """Sections 1-9 complete AND every required document uploaded - the
-    point at which payment is offered for form-first requests."""
-    return not missing_required_fields(visa_request) and not missing_required_documents(visa_request, documents)
+    """Sections 1-9 complete and every required/selected document is ready.
+    Optional documents are required only after an applicant selects Yes;
+    selecting No is a valid completion state."""
+    return not missing_required_fields(visa_request) and not missing_selected_documents(visa_request, documents)
 
 
 def payment_ready(visa_request, documents):
