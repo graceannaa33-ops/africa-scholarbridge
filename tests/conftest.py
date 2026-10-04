@@ -111,9 +111,6 @@ def complete_steps_before_visa(client):
     app_row = db.execute("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1").fetchone()
     rows = db.execute("SELECT id, is_required FROM documents WHERE application_id = ?", (app_row["id"],)).fetchall()
     db.close()
-    app_row = db.execute("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1").fetchone()
-    rows = db.execute("SELECT id, is_required FROM documents WHERE application_id = ?", (app_row["id"],)).fetchall()
-    db.close()
     payload = {f"document_{row['id']}_availability": "no" for row in rows if not row["is_required"]}
     for row in rows:
         if row["is_required"]:
@@ -350,7 +347,12 @@ def complete_visa_form(client, request_id, sign=True):
         r = client.post(f"/student-visa/application/{request_id}/step/{step}", data=answers)
         assert r.status_code == 302, (step, r.status_code)
     upload_visa_support_doc(client, request_id, "Passport-size Photograph")
-    upload_visa_support_doc(client, request_id, "Valid Passport", make_pdf(["PASSPORT"]), "passport.pdf")
+    upload_visa_support_doc(client, request_id, "National ID", make_pdf(["NATIONAL ID"]), "national-id.pdf")
+    db = get_db()
+    optional_rows = db.execute("SELECT id FROM visa_documents WHERE request_id = ? AND is_required = 0", (request_id,)).fetchall()
+    db.close()
+    answers = {f"document_{row['id']}_availability": "no" for row in optional_rows}
+    client.post(f"/student-visa/application/{request_id}/step/documents", data=answers)
     if sign:
         return client.post(f"/student-visa/application/{request_id}/submit",
                            data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
