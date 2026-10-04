@@ -96,6 +96,14 @@ def test_optional_yes_with_upload_can_continue(client, student):
     app, rows = _funding_docs(student["student_id"])
     optional = next(r for r in rows if not r["is_required"])
     db = get_db()
+    # This test isolates optional-document behavior; required documents
+    # are marked complete because the real flow correctly blocks on them.
+    for row in rows:
+        if row["is_required"]:
+            db.execute(
+                "UPDATE documents SET availability='Yes', status='Uploaded', file_path=? WHERE id=?",
+                (f"funding_documents/test-required-{row['id']}.pdf", row["id"]),
+            )
     db.execute("UPDATE documents SET availability=NULL, status='Missing', file_path=NULL WHERE id=?", (optional["id"],))
     db.commit()
     db.close()
