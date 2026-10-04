@@ -450,6 +450,7 @@ def _init_db():
             application_id INTEGER NOT NULL REFERENCES funding_applications(id) ON DELETE CASCADE,
             document_type TEXT NOT NULL,
             is_required INTEGER NOT NULL DEFAULT 1,
+            availability TEXT,
             status TEXT NOT NULL DEFAULT 'Missing' CHECK (status IN ('Missing', 'Uploaded', 'Verified')),
             file_path TEXT,
             uploaded_at TEXT,
@@ -756,6 +757,7 @@ def _init_db():
             request_id INTEGER NOT NULL REFERENCES visa_requests(id) ON DELETE CASCADE,
             document_type TEXT NOT NULL,
             is_required INTEGER NOT NULL DEFAULT 1,
+            availability TEXT,
             status TEXT NOT NULL DEFAULT 'Missing'
                 CHECK (status IN ('Missing', 'Uploaded', 'Verified', 'Replacement Requested')),
             file_path TEXT,
@@ -766,6 +768,14 @@ def _init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Backward-compatible document availability migrations. Existing
+    # uploaded rows are treated as "Yes" for optional documents so returning
+    # applicants do not lose their previous document choice.
+    existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(documents)").fetchall()}
+    if "availability" not in existing_cols:
+        _add_column(cur, "documents", "availability", "TEXT")
+    cur.execute("UPDATE documents SET availability = 'Yes' WHERE availability IS NULL AND status IN ('Uploaded', 'Verified')")
 
     # ---------------------------------------------------------------
     # VISA STATUS HISTORY - an audit trail of visa request status changes.
@@ -1164,9 +1174,10 @@ def _init_db():
     # the student's filename, never a public URL). Rows without stored_file
     # are the older checklist placeholders and keep working as before.
     existing_cols = {row[1] for row in cur.execute("PRAGMA table_info(visa_documents)").fetchall()}
-    for col, definition in {"stored_file": "TEXT", "original_name": "TEXT", "file_size": "INTEGER"}.items():
+    for col, definition in {"stored_file": "TEXT", "original_name": "TEXT", "file_size": "INTEGER", "availability": "TEXT"}.items():
         if col not in existing_cols:
             _add_column(cur, "visa_documents", col, definition)
+    cur.execute("UPDATE visa_documents SET availability = 'Yes' WHERE availability IS NULL AND stored_file IS NOT NULL")
 
     ensure_reference_data(cur)
 
