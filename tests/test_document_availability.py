@@ -108,21 +108,16 @@ def test_optional_yes_with_upload_can_continue(client, student):
     db.commit()
     db.close()
 
-    payload = _funding_payload(
-        rows, optional="yes",
-        files={optional["id"]: b"%PDF-1.4\n% fictional optional document\n"},
+    # Only the target optional document is answered "Yes"; all other
+    # optional documents are explicitly answered "No", matching the real
+    # UI where each optional document has its own Yes/No choice.
+    payload = _funding_payload(rows, optional="no")
+    payload[f"document_{optional['id']}_availability"] = "yes"
+    payload[f"document_{optional['id']}_file"] = (
+        io.BytesIO(b"%PDF-1.4\n% fictional optional document\n"), f"test-{optional['id']}.pdf"
     )
     response = client.post("/application/step/documents", data=payload, content_type="multipart/form-data")
     assert response.status_code == 302
-    if not response.headers["Location"].endswith("/application/step/bank"):
-        with client.session_transaction() as sess:
-            print("FLASHES:", sess.get("_flashes"))
-        db = get_db()
-        print("DOCS AFTER POST:", [dict(r) for r in db.execute(
-            "SELECT id, document_type, is_required, availability, status, file_path FROM documents WHERE application_id=?",
-            (app["id"],)
-        ).fetchall()])
-        db.close()
     assert response.headers["Location"].endswith("/application/step/bank")
 
 
