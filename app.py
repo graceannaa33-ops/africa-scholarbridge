@@ -580,6 +580,31 @@ def send_application_confirmation_email(db, application_id, force=False):
     return sent_ok
 
 
+def _ensure_funding_document_checklist(db, application_id):
+    """Ensure older applications have every current checklist item without
+    duplicating existing document rows."""
+    have = {r["document_type"] for r in db.execute(
+        "SELECT document_type FROM documents WHERE application_id = ?", (application_id,))}
+    for doc_type, required in DOCUMENT_CHECKLIST:
+        if doc_type not in have:
+            db.execute(
+                "INSERT INTO documents (application_id, document_type, is_required, availability) VALUES (?, ?, ?, ?)",
+                (application_id, doc_type, 1 if required else 0, None),
+            )
+
+
+def _missing_funding_documents(documents):
+    missing = []
+    for d in documents:
+        if d["is_required"] and d["status"] == "Missing":
+            missing.append(d["document_type"])
+        elif not d["is_required"] and (d["availability"] or "").lower() == "yes" and d["status"] == "Missing":
+            missing.append(f'{d["document_type"]} (you selected Yes)')
+        elif not d["is_required"] and not d["availability"]:
+            missing.append(f'{d["document_type"]} (choose Yes or No)')
+    return missing
+
+
 def get_or_create_draft_application(db, student, cycle):
     """Every student has at most ONE application per cycle. This fetches
     the existing one, or creates a fresh Draft, pre-filling it from the
@@ -635,8 +660,8 @@ def get_or_create_draft_application(db, student, cycle):
     # Create the document checklist for this application.
     for doc_type, required in DOCUMENT_CHECKLIST:
         db.execute(
-            "INSERT INTO documents (application_id, document_type, is_required) VALUES (?, ?, ?)",
-            (app_id, doc_type, 1 if required else 0),
+            "INSERT INTO documents (application_id, document_type, is_required, availability) VALUES (?, ?, ?, ?)",
+            (app_id, doc_type, 1 if required else 0, None),
         )
     db.commit()
 
@@ -1728,7 +1753,29 @@ def application_step(step_name):
         elif step_name == "statement":
             updates["personal_statement"] = form.get("personal_statement")
         elif step_name == "documents":
-            pass  # documents step just shows the checklist, nothing to save here
+            _ensure_funding_document_checklist(db, application["id"])
+            document_rows = db.execute(
+                "SELECT * FROM documents WHERE application_id = ? ORDER BY id",
+                (application["id"],),
+            ).fetchall()
+            for row in document_rows:
+                if row["is_required"]:
+                    continue
+                answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
+                if answer not in ("yes", "no"):
+                    flash(f'Please choose Yes or No for "{row["document_type"]}".', "warning")
+                    return redirect(url_for("application_step", step_name="documents"))
+                db.execute("UPDATE documents SET availability = ? WHERE id = ?",
+                           (answer.title(), row["id"]))
+            db.commit()
+            document_rows = db.execute(
+                "SELECT * FROM documents WHERE application_id = ? ORDER BY id",
+                (application["id"],),
+            ).fetchall()
+            missing_docs = _missing_funding_documents(document_rows)
+            if missing_docs:
+                flash("Please upload: " + ", ".join(missing_docs) + ".", "warning")
+                return redirect(url_for("application_step", step_name="documents"))
         elif step_name == "review":
             # Review leads to the FINAL step (Visa Verification), so make
             # sure the earlier steps that must be filled actually are.
@@ -1761,6 +1808,8 @@ def application_step(step_name):
 
     # Refresh application after any earlier commits
     application = db.execute("SELECT * FROM funding_applications WHERE id = ?", (application["id"],)).fetchone()
+    _ensure_funding_document_checklist(db, application["id"])
+    db.commit()
     documents = db.execute("SELECT * FROM documents WHERE application_id = ?", (application["id"],)).fetchall()
     review_bank, review_masked_account = None, None
     if step_name == "review":
@@ -2164,10 +2213,15 @@ def documents():
 
     if request.method == "POST":
         doc_id = request.form.get("document_id")
-        # We simulate an upload (no real file storage needed for the demo) -
-        # this keeps the project simple while still exercising the workflow.
+        row = db.execute(
+            "SELECT * FROM documents WHERE id = ? AND application_id = ?",
+            (doc_id, application["id"]),
+        ).fetchone()
+        if not row:
+            abort(404)
         db.execute(
-            "UPDATE documents SET status = 'Uploaded', uploaded_at = CURRENT_TIMESTAMP, file_path = ? WHERE id = ? AND application_id = ?",
+            "UPDATE documents SET status = 'Uploaded', availability = 'Yes', uploaded_at = CURRENT_TIMESTAMP, file_path = ? "
+            "WHERE id = ? AND application_id = ?",
             (f"uploads/demo-{doc_id}.pdf", doc_id, application["id"]),
         )
         db.commit()
@@ -2175,7 +2229,8 @@ def documents():
         return redirect(url_for("documents"))
 
     docs = db.execute("SELECT * FROM documents WHERE application_id = ?", (application["id"],)).fetchall()
-    return render_template("documents.html", application=application, documents=docs)
+    return render_template("documents.html", application=application, documents=docs,
+                           missing_documents=_missing_funding_documents(docs))
 
 
 @app.route("/notifications/mark-read/<int:notification_id>", methods=["POST"])
