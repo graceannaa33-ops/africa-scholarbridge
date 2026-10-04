@@ -3190,9 +3190,44 @@ def student_visa_step(request_id, step_name):
     if visa_lib.form_is_first(visa_request) and not paid and step_index > docs_index:
         flash("Please complete the Visa Assistance Payment on the Documents page first.", "warning")
         return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
-    if (visa_lib.form_is_first(visa_request) and not paid and step_name == "documents"
-            and request.method == "POST"):
-        flash("Upload your required documents and complete the Visa Assistance Payment to continue.", "warning")
+
+    if step_name == "documents" and request.method == "POST":
+        _ensure_visa_checklist(db, request_id)
+        rows = _checklist_documents(db, request_id)
+        for row in rows:
+            if row["is_required"]:
+                answer = "yes"
+            else:
+                answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
+                if answer not in ("yes", "no"):
+                    flash(f'Please choose Yes or No for "{row["document_type"]}".', "warning")
+                    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+            if answer == "no":
+                db.execute("UPDATE visa_documents SET availability='No' WHERE id=?", (row["id"],))
+                continue
+            db.execute("UPDATE visa_documents SET availability='Yes' WHERE id=?", (row["id"],))
+            upload = request.files.get(f"document_{row['id']}_file")
+            if upload and upload.filename:
+                original = secure_filename(upload.filename)[:200] or "document"
+                ext = _visa_doc_extension(upload.filename)
+                if ext not in ALLOWED_SUPPORT_DOC_EXTENSIONS:
+                    flash(f'{row["document_type"]}: only PDF, JPG, JPEG and PNG are accepted.', "danger")
+                    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+                data = upload.stream.read(MAX_SUPPORT_DOC_SIZE_BYTES + 1)
+                if not data or len(data) > MAX_SUPPORT_DOC_SIZE_BYTES or not data.startswith(_SUPPORT_DOC_SIGNATURES[ext]):
+                    flash(f'{row["document_type"]}: invalid or oversized document.', "danger")
+                    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+                stored = f"{secrets.token_hex(16)}.{ext}"
+                with open(os.path.join(VISA_APP_DOCS_DIR, stored), "wb") as fh:
+                    fh.write(data)
+                if row["stored_file"]:
+                    _remove_support_doc_file(row["stored_file"])
+                db.execute("UPDATE visa_documents SET stored_file=?, original_name=?, file_size=?, status='Uploaded', uploaded_at=CURRENT_TIMESTAMP, file_path=NULL WHERE id=?",
+                           (stored, original, len(data), row["id"]))
+            elif not row["stored_file"]:
+                flash(f'Please upload "{row["document_type"]}" because you selected Yes.', "warning")
+                return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+        db.commit()
         return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
 
     if request.method == "POST" and step_name != "declaration":
