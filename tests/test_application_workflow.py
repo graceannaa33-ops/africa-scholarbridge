@@ -266,15 +266,15 @@ def test_declaration_rules(client, student):
     assert r.headers["Location"].endswith("/step/passport")
 
     client.post(f"/student-visa/application/{vr['id']}/step/passport", data=VISA_FORM_ANSWERS["passport"])
-    doc = q("SELECT id FROM visa_documents WHERE request_id = ? AND document_type = 'Passport-size Photograph'",
+    doc = q("SELECT id FROM visa_documents WHERE request_id = ? AND document_type = 'National ID'",
              (vr["id"],))[0][0]
     client.post(f"/student-visa/application/{vr['id']}/documents/{doc}/remove")
     r = client.post(f"/student-visa/application/{vr['id']}/submit",
                     data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})
     assert r.headers["Location"].endswith("/step/documents")
-    assert "Passport-size Photograph" in flashes(client)
+    assert "National ID" in flashes(client)
 
-    upload_visa_support_doc(client, vr["id"], "Passport-size Photograph", make_pdf(["PHOTO"]), "photo.pdf")
+    upload_visa_support_doc(client, vr["id"], "National ID", make_pdf(["PHOTO"]), "national-id.pdf")
     r = client.post(f"/student-visa/application/{vr['id']}/submit",
                     data={"declaration_name": APPLICANT["full_name"]})
     assert r.headers["Location"].endswith("/step/declaration")
@@ -472,16 +472,9 @@ def test_standalone_visa_service_still_pays_first():
 # ---------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("policy,needed", [
-    (None, ["Passport-size Photograph", "Valid Passport"]),          # default
-    ("photo,identity", ["Passport-size Photograph", "Valid Passport"]),
-    ("photo", ["Passport-size Photograph"]),
-    ("identity", ["Valid Passport"]),
-    ("none", []),
-    (" Photo ; bogus ", ["Passport-size Photograph"]),
-])
 def test_required_documents_policy(client, student, monkeypatch):
-    """Legacy policy settings cannot make the public required documents optional."""
+    """The public visa checklist always requires the photo and identity document.
+    Legacy environment settings cannot make those two identity requirements optional."""
     monkeypatch.setenv("VISA_REQUIRED_DOCUMENTS", "none")
     client.post("/application/step/visa", data={"visa_choice": "no"})
     vr = request_of(student)
