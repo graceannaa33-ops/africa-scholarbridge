@@ -78,7 +78,7 @@
 
           {% if step_name == 'documents' %}
             <h4 class="fw-bold mb-2">10. Documents Checklist</h4>
-            <p class="text-muted small">Choose Yes or No for every optional document. If you choose Yes, you must upload it. Your files are private and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
+            <p class="text-muted small" id="requiredDocuments">Required: Passport-size Photograph and National ID. Choose Yes or No for every optional document. If you choose Yes, you must upload it. Your files are private and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
             {% if missing_documents %}
             <div class="alert alert-warning small py-2">Before continuing: {{ missing_documents|join(', ') }}</div>
             {% endif %}
@@ -144,6 +144,8 @@
               {% if documents_complete %}
                 <div class="alert alert-success" role="status" id="documentsComplete">
                   <div class="fw-semibold">✓ All document requirements completed.</div>
+                  <div class="small mt-1">All required documents uploaded successfully.</div>
+                  <div class="small">✓ Documents uploaded successfully</div>
                 </div>
                 <p class="fw-semibold mb-2">Next step: Visa Assistance Payment → then Section 11: Additional Information</p>
                 {% if paystack_enabled or r.payment_verified %}
