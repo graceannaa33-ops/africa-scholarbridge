@@ -78,52 +78,72 @@
 
           {% if step_name == 'documents' %}
             <h4 class="fw-bold mb-2">10. Documents Checklist</h4>
-            <p class="text-muted small">Upload the documents that apply to you. Accepted: {{ allowed_doc_extensions|join(', ')|upper }}, up to {{ max_doc_mb }} MB each.
-              Your files are stored securely and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
-            {% if required_documents %}
-            <p class="small mb-3" id="requiredDocuments"><strong>Required:</strong> {{ required_documents|join(', ') }}.
-              All other documents are optional — upload them if they apply to you.</p>
-            {% else %}
-            <p class="small mb-3" id="requiredDocuments">All documents are optional — upload the ones that apply to you.</p>
-            {% endif %}
+            <p class="text-muted small">Choose Yes or No for every optional document. If you choose Yes, you must upload it. Your files are private and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
             {% if missing_documents %}
-            <div class="alert alert-warning small py-2">Still needed: {{ missing_documents|join(', ') }}</div>
+            <div class="alert alert-warning small py-2">Before continuing: {{ missing_documents|join(', ') }}</div>
             {% endif %}
-            <ul class="list-group mb-3" id="documentChecklist">
+            <ul class="list-group mb-3" id="visaDocumentChecklist">
               {% for d in documents %}
               <li class="list-group-item">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                  <span>{{ d.document_type }}
-                    {% if d.document_type in required_documents %}<span class="badge bg-danger ms-1">Required</span>
-                    {% else %}<span class="badge bg-light text-dark border ms-1">If applicable</span>{% endif %}</span>
-                  {% if d.stored_file %}
-                    <span class="d-flex align-items-center gap-2">
-                      <span class="badge bg-success">Uploaded</span>
-                      <a href="{{ url_for('student_visa_document_file', document_id=d.id) }}" target="_blank" rel="noopener" class="small">View</a>
-                      <form method="POST" action="{{ url_for('student_visa_document_remove', request_id=r.id, document_id=d.id) }}" class="d-inline">
-                        <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
-                      </form>
-                    </span>
-                  {% else %}
-                    <span class="badge bg-secondary">Not uploaded</span>
-                  {% endif %}
+                  <strong>{{ d.document_type }}</strong>
+                  {% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}
                 </div>
-                {% if d.stored_file %}<div class="small text-muted">{{ d.original_name }}</div>{% endif %}
-                <form method="POST" action="{{ url_for('student_visa_document_upload', request_id=r.id) }}" enctype="multipart/form-data" class="d-flex gap-2 mt-2 flex-wrap">
-                  <input type="hidden" name="document_type" value="{{ d.document_type }}">
-                  <input type="file" name="document" class="form-control form-control-sm" style="max-width: 320px;" accept=".pdf,.jpg,.jpeg,.png" required>
-                  <button type="submit" class="btn btn-sm btn-outline-primary">{{ 'Replace' if d.stored_file else 'Upload' }}</button>
-                </form>
-                <div class="form-text">{{ doc_examples.get(d.document_type, 'Example: Upload a clear copy of this document') }}.
-                  Accepted formats: {{ allowed_doc_extensions|join(', ')|upper }}. Maximum size: {{ max_doc_mb }} MB.</div>
+                {% if d.is_required %}
+                  <div class="mt-2">
+                    {% if d.stored_file %}
+                      <span class="badge bg-success">Uploaded</span>
+                    {% else %}
+                      <span class="badge bg-warning text-dark">Missing</span>
+                    {% endif %}
+                  </div>
+                  {% if not d.stored_file %}
+                  <label class="form-label mt-2" for="file_{{ d.id }}">Upload {{ d.document_type }}</label>
+                  <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+                  {% endif %}
+                {% else %}
+                  <div class="form-label fw-semibold mt-3">Do you have this document?</div>
+                  <div class="d-flex flex-column flex-sm-row gap-2">
+                    <div class="form-check">
+                      <input class="form-check-input visa-availability-choice" type="radio" name="document_{{ d.id }}_availability" value="yes"
+                             id="visa_doc_{{ d.id }}_yes" data-upload-target="visa_upload_{{ d.id }}" {{ 'checked' if d.availability == 'Yes' }}>
+                      <label class="form-check-label" for="visa_doc_{{ d.id }}_yes">Yes, I have it</label>
+                    </div>
+                    <div class="form-check">
+                      <input class="form-check-input visa-availability-choice" type="radio" name="document_{{ d.id }}_availability" value="no"
+                             id="visa_doc_{{ d.id }}_no" data-upload-target="visa_upload_{{ d.id }}" {{ 'checked' if d.availability == 'No' }}>
+                      <label class="form-check-label" for="visa_doc_{{ d.id }}_no">No, I don't have it</label>
+                    </div>
+                  </div>
+                  <div id="visa_upload_{{ d.id }}" class="mt-2 {{ '' if d.availability == 'Yes' else 'd-none' }}">
+                    {% if d.stored_file %}
+                      <span class="badge bg-success">Uploaded</span>
+                    {% else %}
+                      <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }}</label>
+                      <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+                    {% endif %}
+                  </div>
+                  {% if d.availability == 'No' %}
+                  <div class="alert alert-light border small mt-2 mb-0"><strong>Not available</strong> — you selected No. You can continue without uploading this document.</div>
+                  {% endif %}
+                {% endif %}
+                {% if d.stored_file %}<div class="small text-muted mt-1">{{ d.original_name }}</div>{% endif %}
               </li>
               {% endfor %}
             </ul>
+            <div class="form-text mb-3">Accepted formats: PDF, JPG, JPEG, PNG. Maximum size: {{ max_doc_mb }} MB per document.</div>
+            <script>
+              document.querySelectorAll('.visa-availability-choice').forEach(function (choice) {
+                choice.addEventListener('change', function () {
+                  var target = document.getElementById(this.dataset.uploadTarget);
+                  if (target) target.classList.toggle('d-none', this.value !== 'yes');
+                });
+              });
+            </script>
             {% if form_first %}
               {% if documents_complete %}
                 <div class="alert alert-success" role="status" id="documentsComplete">
-                  <div>All required documents uploaded successfully.</div>
-                  <div class="fw-semibold">✓ Documents uploaded successfully</div>
+                  <div class="fw-semibold">✓ All document requirements completed.</div>
                 </div>
                 <p class="fw-semibold mb-2">Next step: Visa Assistance Payment</p>
                 {% if paystack_enabled or r.payment_verified %}
@@ -137,22 +157,19 @@
                   </div>
                 {% endif %}
               {% else %}
-                <div class="alert alert-light border small" id="paymentNotYet">
-                  The Visa Assistance Payment opens here once
-                  {% if missing_fields %}sections
-                    {% for s in missing_fields|map(attribute=0)|unique %}<a href="{{ url_for('student_visa_step', request_id=r.id, step_name=s) }}">{{ step_titles[s] }}</a>{{ ', ' if not loop.last }}{% endfor %}
-                    are complete{% if missing_documents %} and {% endif %}{% endif %}{% if missing_documents %}your required documents are uploaded{% endif %}.
-                </div>
+                <div class="alert alert-light border small" id="paymentNotYet">Complete all required documents and every optional Yes/No choice before payment becomes available.</div>
               {% endif %}
             {% endif %}
-            <form method="POST" class="d-flex justify-content-between mt-4">
+            <form method="POST" enctype="multipart/form-data" class="d-flex justify-content-between mt-4">
               <a href="{{ url_for('student_visa_step', request_id=r.id, step_name=steps[step_index - 1]) }}" class="btn btn-outline-secondary">← Back</a>
               {% if not form_first or r.payment_verified %}
               <button type="submit" class="btn btn-primary fw-semibold">Save &amp; Continue →</button>
+              {% else %}
+              <button type="submit" class="btn btn-primary fw-semibold">Save Documents &amp; Continue →</button>
               {% endif %}
             </form>
 
-          {% elif step_name == 'declaration' %}
+{% elif step_name == 'declaration' %}
             <h4 class="fw-bold mb-3">12. Applicant Declaration</h4>
             {% if missing_fields or missing_documents %}
             <div class="alert alert-warning small">
