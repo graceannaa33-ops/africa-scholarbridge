@@ -3272,7 +3272,7 @@ def student_visa_step(request_id, step_name):
         step_index=step_index, steps=visa_lib.VISA_APPLICATION_STEPS, step_titles=visa_lib.VISA_STEP_TITLES,
         documents=documents, v=visa_lib, form_first=visa_lib.form_is_first(visa_request),
         missing_fields=visa_lib.missing_required_fields(visa_request),
-        missing_documents=visa_lib.missing_required_documents(visa_request, documents),
+        missing_documents=visa_lib.missing_selected_documents(visa_request, documents),
         required_documents=visa_lib.required_document_types(visa_request),
         allowed_doc_extensions=sorted(ALLOWED_SUPPORT_DOC_EXTENSIONS),
         max_doc_mb=MAX_SUPPORT_DOC_SIZE_BYTES // (1024 * 1024),
@@ -3428,7 +3428,7 @@ def student_visa_submit(request_id):
             return redirect(url_for("student_visa_step", request_id=request_id,
                                      step_name="travel_history" if answer == "travelled_before" else "legal"))
     _ensure_visa_checklist(db, request_id)
-    missing_docs = visa_lib.missing_required_documents(visa_request, _checklist_documents(db, request_id))
+    missing_docs = visa_lib.missing_selected_documents(visa_request, _checklist_documents(db, request_id))
     if missing_docs:
         db.commit()
         flash("Please upload: " + ", ".join(missing_docs) + ".", "warning")
