@@ -1869,6 +1869,7 @@ def application_step(step_name):
     return render_template(
         "application.html", application=application, step_name=step_name, step_index=step_index,
         steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES, documents=documents,
+        missing_documents=_missing_funding_documents(documents),
         review_bank=review_bank, review_masked_account=review_masked_account,
     )
 
