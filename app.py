@@ -277,6 +277,37 @@ def _fail_visa_verification(db, student, application, cycle, reasons):
         flash(reason, "danger")
     return _send_to_visa_assistance(db, student, application, cycle)
 
+FUNDING_DOCS_DIR = os.path.join(UPLOAD_ROOT, "funding_documents")
+os.makedirs(FUNDING_DOCS_DIR, exist_ok=True)
+ALLOWED_FUNDING_DOC_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
+MAX_FUNDING_DOC_SIZE_BYTES = 8 * 1024 * 1024
+_FUNDING_DOC_SIGNATURES = {
+    "pdf": (b"%PDF-",),
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "png": (b"\x89PNG\r\n\x1a\n",),
+}
+
+def _funding_doc_extension(filename):
+    return filename.rsplit(".", 1)[1].lower() if filename and "." in filename else None
+
+def _save_funding_document(file_storage):
+    filename = secure_filename(file_storage.filename or "")[:200]
+    ext = _funding_doc_extension(filename)
+    if ext not in ALLOWED_FUNDING_DOC_EXTENSIONS:
+        return None, "Only PDF, JPG, JPEG and PNG files can be uploaded."
+    data = file_storage.stream.read(MAX_FUNDING_DOC_SIZE_BYTES + 1)
+    if not data:
+        return None, "That file is empty."
+    if len(data) > MAX_FUNDING_DOC_SIZE_BYTES:
+        return None, f"That file is too large. The maximum size is {MAX_FUNDING_DOC_SIZE_BYTES // (1024 * 1024)} MB."
+    if not data.startswith(_FUNDING_DOC_SIGNATURES[ext]):
+        return None, "That file does not match its PDF/JPG/PNG file type."
+    stored = f"{secrets.token_hex(16)}.{ext}"
+    with open(os.path.join(FUNDING_DOCS_DIR, stored), "wb") as fh:
+        fh.write(data)
+    return stored, None
+
 PAYMENT_PROOF_DIR = os.path.join(UPLOAD_ROOT, "payment_proofs")
 os.makedirs(PAYMENT_PROOF_DIR, exist_ok=True)
 ALLOWED_PAYMENT_PROOF_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
@@ -1760,22 +1791,36 @@ def application_step(step_name):
             ).fetchall()
             for row in document_rows:
                 if row["is_required"]:
+                    answer = "Yes"
+                else:
+                    answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
+                    if answer not in ("yes", "no"):
+                        flash(f'Please choose Yes or No for "{row["document_type"]}".', "warning")
+                        return redirect(url_for("application_step", step_name="documents"))
+                if answer == "no":
+                    db.execute("UPDATE documents SET availability = 'No' WHERE id = ?", (row["id"],))
                     continue
-                answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
-                if answer not in ("yes", "no"):
-                    flash(f'Please choose Yes or No for "{row["document_type"]}".', "warning")
+                db.execute("UPDATE documents SET availability = 'Yes' WHERE id = ?", (row["id"],))
+                upload = request.files.get(f"document_{row['id']}_file")
+                if upload and upload.filename:
+                    stored, error = _save_funding_document(upload)
+                    if error:
+                        flash(f'{row["document_type"]}: {error}', "danger")
+                        return redirect(url_for("application_step", step_name="documents"))
+                    if row["file_path"] and row["file_path"].startswith("funding_documents/"):
+                        old_path = os.path.join(FUNDING_DOCS_DIR, os.path.basename(row["file_path"]))
+                        try:
+                            os.remove(old_path)
+                        except OSError:
+                            pass
+                    db.execute(
+                        "UPDATE documents SET file_path = ?, status = 'Uploaded', uploaded_at = CURRENT_TIMESTAMP WHERE id = ?",
+                        (f"funding_documents/{stored}", row["id"]),
+                    )
+                elif row["status"] == "Missing":
+                    flash(f'Please upload "{row["document_type"]}" before continuing.', "warning")
                     return redirect(url_for("application_step", step_name="documents"))
-                db.execute("UPDATE documents SET availability = ? WHERE id = ?",
-                           (answer.title(), row["id"]))
             db.commit()
-            document_rows = db.execute(
-                "SELECT * FROM documents WHERE application_id = ? ORDER BY id",
-                (application["id"],),
-            ).fetchall()
-            missing_docs = _missing_funding_documents(document_rows)
-            if missing_docs:
-                flash("Please upload: " + ", ".join(missing_docs) + ".", "warning")
-                return redirect(url_for("application_step", step_name="documents"))
         elif step_name == "review":
             # Review leads to the FINAL step (Visa Verification), so make
             # sure the earlier steps that must be filled actually are.
@@ -1808,6 +1853,8 @@ def application_step(step_name):
 
     # Refresh application after any earlier commits
     application = db.execute("SELECT * FROM funding_applications WHERE id = ?", (application["id"],)).fetchone()
+    _ensure_funding_document_checklist(db, application["id"])
+    db.commit()
     _ensure_funding_document_checklist(db, application["id"])
     db.commit()
     documents = db.execute("SELECT * FROM documents WHERE application_id = ?", (application["id"],)).fetchall()
