@@ -9,7 +9,7 @@
     <div class="col-lg-8">
       <div class="card asb-card shadow-sm">
         <div class="card-body p-4 p-md-5">
-          <form method="POST">
+          <form method="POST" enctype="multipart/form-data">
 
             {% if step_name == 'personal' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Personal Information</h4>
@@ -127,7 +127,7 @@
 
             {% elif step_name == 'documents' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>
-              <p class="text-muted">For required documents, upload the document before continuing. For optional documents, tell us whether you have the document.</p>
+              <p class="text-muted">Required documents must be uploaded before you continue. For optional documents, tell us whether you have them.</p>
               {% if missing_documents %}
               <div class="alert alert-warning small" role="alert">Before continuing: {{ missing_documents|join(', ') }}.</div>
               {% endif %}
@@ -143,38 +143,51 @@
                       <div class="mb-2"><span class="badge {{ 'bg-success' if d.status != 'Missing' else 'bg-warning text-dark' }}">
                         {{ 'Uploaded' if d.status != 'Missing' else 'Missing' }}</span></div>
                       {% if d.status == 'Missing' %}
-                      <label class="form-label">Upload {{ d.document_type }}</label>
-                      <input type="file" name="document_{{ d.id }}_file" class="form-control" disabled
-                             aria-label="Upload {{ d.document_type }}">
-                      <div class="form-text">Use the <strong>Manage Documents</strong> page below to upload this document.</div>
+                        <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }}</label>
+                        <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
                       {% endif %}
                     {% else %}
                       <div class="form-label fw-semibold">Do you have this document?</div>
                       <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
                         <div class="form-check">
-                          <input class="form-check-input" type="radio" name="document_{{ d.id }}_availability" value="yes"
-                                 id="doc_{{ d.id }}_yes" {{ 'checked' if d.availability == 'Yes' }}>
+                          <input class="form-check-input availability-choice" type="radio" name="document_{{ d.id }}_availability" value="yes"
+                                 id="doc_{{ d.id }}_yes" data-upload-target="upload_{{ d.id }}" {{ 'checked' if d.availability == 'Yes' }}>
                           <label class="form-check-label" for="doc_{{ d.id }}_yes">Yes, I have it</label>
                         </div>
                         <div class="form-check">
-                          <input class="form-check-input" type="radio" name="document_{{ d.id }}_availability" value="no"
-                                 id="doc_{{ d.id }}_no" {{ 'checked' if d.availability == 'No' }}>
+                          <input class="form-check-input availability-choice" type="radio" name="document_{{ d.id }}_availability" value="no"
+                                 id="doc_{{ d.id }}_no" data-upload-target="upload_{{ d.id }}" {{ 'checked' if d.availability == 'No' }}>
                           <label class="form-check-label" for="doc_{{ d.id }}_no">No, I don't have it</label>
                         </div>
                       </div>
-                      {% if d.availability == 'Yes' %}
+                      <div id="upload_{{ d.id }}" class="{{ '' if d.availability == 'Yes' else 'd-none' }}">
                         {% if d.status == 'Missing' %}
-                        <div class="alert alert-light border small mb-2">Upload this document to continue.</div>
-                        {% else %}<div class="badge bg-success mb-2">Uploaded</div>{% endif %}
-                      {% elif d.availability == 'No' %}
-                        <div class="alert alert-light border small mb-0"><strong>Not available</strong> — you selected No. You can continue without uploading this document.</div>
+                          <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }}</label>
+                          <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+                        {% else %}
+                          <span class="badge bg-success">Uploaded</span>
+                        {% endif %}
+                      </div>
+                      {% if d.availability == 'No' %}
+                        <div class="alert alert-light border small mt-2 mb-0"><strong>Not available</strong> — you selected No. You can continue without uploading this document.</div>
                       {% endif %}
                     {% endif %}
                   </div>
                 </div>
               {% endfor %}
               </div>
-              <a href="{{ url_for('documents') }}" class="btn btn-sm btn-outline-primary">Manage Documents / Upload Files</a>{% elif step_name == 'review' %}
+              <div class="form-text mb-3">Accepted formats: PDF, JPG, JPEG, PNG. Maximum size: 8 MB per document.</div>
+              <script>
+                document.querySelectorAll('.availability-choice').forEach(function (choice) {
+                  choice.addEventListener('change', function () {
+                    var target = document.getElementById(this.dataset.uploadTarget);
+                    if (!target) return;
+                    target.classList.toggle('d-none', this.value !== 'yes');
+                    var noMessage = target.parentElement.querySelector('.not-available-message');
+                    if (noMessage) noMessage.classList.toggle('d-none', this.value !== 'no');
+                  });
+                });
+              </script>{% elif step_name == 'review' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Review Your Application</h4>
               <p class="text-muted">Please review your information below. The final step after this review is <strong>Visa Verification</strong>.</p>
               <table class="table table-sm">
