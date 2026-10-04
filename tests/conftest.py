@@ -136,6 +136,30 @@ def visa_requests_for(application_id):
     return rows
 
 
+
+def visa_request_for(client, student):
+    """Create the form-first visa assistance request used by document-flow tests.
+    The annual application is already at the final Visa Verification step."""
+    application = get_application(student["student_id"])
+    if not application:
+        raise AssertionError("Expected a funding application for the test student.")
+
+    requests = visa_requests_for(application["id"])
+    if requests:
+        return requests[-1]["id"]
+
+    response = client.post("/application/step/visa", data={"visa_choice": "no"})
+    assert response.status_code == 302, response.status_code
+
+    application = get_application(student["student_id"])
+    request_id = application["visa_request_id"]
+    assert request_id, "Expected visa assistance request to be linked to the annual application."
+
+    # Put the request in the same document-ready state used by the existing
+    # visa tests: required photograph + National ID uploaded, optional items No.
+    complete_visa_form(client, request_id, sign=False)
+    return request_id
+
 def count_applications(student_id):
     db = get_db()
     n = db.execute("SELECT COUNT(*) FROM funding_applications WHERE student_id = ?", (student_id,)).fetchone()[0]
