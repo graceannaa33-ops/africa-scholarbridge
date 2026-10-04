@@ -68,7 +68,7 @@
          style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
   </div>
   {% if form_first %}
-  <p class="small text-muted mb-4">Visa Form &rarr; Document Upload &rarr; Payment &rarr; Additional Information &rarr; Declaration &rarr; Application Completed</p>
+  <p class="small text-muted mb-4">Sections 1–9 → <strong>10. Documents</strong> → Visa Assistance Payment → <strong>11. Additional Information</strong> → <strong>12. Declaration</strong> → Application Completed</p>
   {% else %}<div class="mb-4"></div>{% endif %}
 
   <div class="row justify-content-center">
@@ -145,7 +145,7 @@
                 <div class="alert alert-success" role="status" id="documentsComplete">
                   <div class="fw-semibold">✓ All document requirements completed.</div>
                 </div>
-                <p class="fw-semibold mb-2">Next step: Visa Assistance Payment</p>
+                <p class="fw-semibold mb-2">Next step: Visa Assistance Payment → then Section 11: Additional Information</p>
                 {% if paystack_enabled or r.payment_verified %}
                   {% include 'student_visa/_paystack_payment.html' %}
                 {% else %}
