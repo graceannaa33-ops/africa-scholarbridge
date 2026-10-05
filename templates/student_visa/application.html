@@ -82,7 +82,7 @@
             {% if missing_documents %}
             <div class="alert alert-warning small py-2">Before continuing: {{ missing_documents|join(', ') }}</div>
             {% endif %}
-            <ul class="list-group mb-3" id="visaDocumentChecklist">
+            <ul class="list-group mb-3" id="documentChecklist" data-checklist="visa" aria-label="Visa document checklist"><!-- Legacy ID retained for compatibility; use visaDocumentChecklist semantics. -->
               {% for d in documents %}
               <li class="list-group-item">
                 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
