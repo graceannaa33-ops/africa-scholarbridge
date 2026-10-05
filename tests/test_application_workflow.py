@@ -503,5 +503,9 @@ def test_no_passport_requires_national_id_when_identity_is_required(client, stud
     page = client.get(f"/student-visa/application/{vr['id']}/step/documents").get_data(as_text=True)
     assert "National ID" in page.split('id="requiredDocuments"')[1].split("</p>")[0]
     assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 302          # not before the ID
+    # Passport is optional. The public visa-assistance policy always requires
+    # both the passport-size photograph and National ID, even if the legacy
+    # VISA_REQUIRED_DOCUMENTS setting is changed.
+    upload_visa_support_doc(client, vr["id"], "Passport-size Photograph", make_pdf(["PHOTO"]), "photo.pdf")
     upload_visa_support_doc(client, vr["id"], "National ID", make_pdf(["ID"]), "id.pdf")
-    assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 200          # right after it
+    assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 200          # after both required docs
