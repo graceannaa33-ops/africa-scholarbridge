@@ -387,12 +387,12 @@ DEMO_MODE = False  # Legacy demo payment is permanently disabled for manual veri
 # Document checklist used for every application (kept simple / hard-coded
 # for a beginner project - could later move into its own database table).
 DOCUMENT_CHECKLIST = [
-    ("Academic Transcripts", True),
-    ("Certificates", True),
+    ("Academic Transcripts", False),
+    ("Certificates", False),
     ("Admission Letter", False),
-    ("Recommendation Letter", True),
-    ("Personal Statement", True),
-    ("CV", True),
+    ("Recommendation Letter", False),
+    ("Personal Statement", False),
+    ("CV", False),
     ("Passport / Identity Document", False),
     ("Proof of Financial Need", False),
     ("Provider-Specific Document", False),
@@ -612,27 +612,39 @@ def send_application_confirmation_email(db, application_id, force=False):
 
 
 def _ensure_funding_document_checklist(db, application_id):
-    """Ensure older applications have every current checklist item without
-    duplicating existing document rows."""
+    """Ensure every current funding checklist item exists and is optional.
+
+    Existing applications may have been created under the older policy where
+    some documents were required. Their checklist rows are migrated to the
+    current all-optional policy without deleting uploaded files or answers.
+    """
     have = {r["document_type"] for r in db.execute(
         "SELECT document_type FROM documents WHERE application_id = ?", (application_id,))}
     for doc_type, required in DOCUMENT_CHECKLIST:
         if doc_type not in have:
             db.execute(
                 "INSERT INTO documents (application_id, document_type, is_required, availability) VALUES (?, ?, ?, ?)",
-                (application_id, doc_type, 1 if required else 0, None),
+                (application_id, doc_type, 0, None),
             )
+    db.execute(
+        """UPDATE documents
+           SET is_required = 0
+           WHERE application_id = ?
+             AND document_type IN ({})""".format(",".join("?" * len(DOCUMENT_CHECKLIST))),
+        (application_id, *[doc_type for doc_type, _ in DOCUMENT_CHECKLIST]),
+    )
 
 
 def _missing_funding_documents(documents):
+    """Only a document explicitly marked Yes needs an upload.
+
+    All funding documents are optional, so leaving an item unanswered does
+    not block the application from continuing.
+    """
     missing = []
     for d in documents:
-        if d["is_required"] and d["status"] == "Missing":
-            missing.append(d["document_type"])
-        elif not d["is_required"] and (d["availability"] or "").lower() == "yes" and d["status"] == "Missing":
+        if (d["availability"] or "").lower() == "yes" and d["status"] == "Missing":
             missing.append(f'{d["document_type"]} (you selected Yes)')
-        elif not d["is_required"] and not d["availability"]:
-            missing.append(f'{d["document_type"]} (choose Yes or No)')
     return missing
 
 
