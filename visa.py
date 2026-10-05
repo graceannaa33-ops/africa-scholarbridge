@@ -155,7 +155,7 @@ VISA_REQUIRED_FIELDS = {
     "visa_info": ["destination_country", "visa_category", "purpose_of_travel"],
     "education": ["current_status"],
     "financial": ["trip_payer"],
-    "accommodation": ["accommodation_type"],
+    "accommodation": [],
     "travel_history": ["travelled_before", "previous_application"],
     "legal": ["overstayed", "refused_entry", "visa_refused"],
 }
