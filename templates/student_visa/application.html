@@ -261,7 +261,7 @@
               <div class="row g-3">
                 <div class="col-md-6">{{ text('destination_country', 'Country You Want to Visit', required=True, placeholder='e.g. Example Country') }}</div>
                 <div class="col-md-6">{{ select('visa_category', 'Visa Type', v.VISA_TYPES, required=True, default=v.DEFAULT_VISA_TYPE) }}</div>
-                <div class="col-12">{{ area('purpose_of_travel', 'Purpose of Travel', rows=2, required=True, placeholder='e.g. Educational studies') }}</div>
+                <div class="col-12">{{ area('purpose_of_travel', 'Purpose of Travel', rows=2, required=True, placeholder='e.g. Educational purpose') }}</div>
                 <div class="col-md-4">{{ text('intended_arrival_date', 'Intended Date of Arrival', type='date', hint='Example: 01/09/2027') }}</div>
                 <div class="col-md-4">{{ text('intended_departure_date', 'Intended Date of Departure', type='date', hint='Example: 01/06/2031') }}</div>
                 <div class="col-md-4">{{ text('expected_length_of_stay', 'Expected Length of Stay', placeholder='e.g. 4 years') }}</div>
@@ -305,10 +305,10 @@
             {% elif step_name == 'accommodation' %}
               <h4 class="fw-bold mb-3">7. Accommodation Information</h4>
               <div class="row g-3">
-                <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay?', v.ACCOMMODATION_TYPES, required=True) }}</div>
-                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation', placeholder='e.g. Example Student Residence') }}</div>
-                <div class="col-12">{{ area('accommodation_address', 'Address', rows=2, placeholder='e.g. 123 Example Street, Exampletown') }}</div>
-                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email', placeholder='e.g. housing@example.com') }}</div>
+                <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay? (optional)', v.ACCOMMODATION_TYPES) }}</div>
+                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation (optional)', placeholder='e.g. Example Student Residence') }}</div>
+                <div class="col-12">{{ area('accommodation_address', 'Address (optional)', rows=2, placeholder='e.g. 123 Example Street, Exampletown') }}</div>
+                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email (optional)', placeholder='e.g. housing@example.com') }}</div>
               </div>
 
             {% elif step_name == 'travel_history' %}
