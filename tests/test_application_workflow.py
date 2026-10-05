@@ -472,7 +472,7 @@ def test_standalone_visa_service_still_pays_first():
 # ---------------------------------------------------------------------
 
 
-def test_required_documents_policy(client, student, monkeypatch):
+def test_required_documents_policy(client, student, monkeypatch, policy, needed):
     """The public visa checklist always requires the photo and identity document.
     Legacy environment settings cannot make those two identity requirements optional."""
     monkeypatch.setenv("VISA_REQUIRED_DOCUMENTS", "none")
