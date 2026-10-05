@@ -43,37 +43,23 @@ def _funding_payload(rows, optional="no", files=None):
     return payload
 
 
-def test_required_document_missing_cannot_continue(client, student):
+def test_all_funding_documents_are_optional(client, student):
     app, rows = _funding_docs(student["student_id"])
-    required = next(r for r in rows if r["is_required"])
-    db = get_db()
-    db.execute("UPDATE documents SET status='Missing', file_path=NULL WHERE id=?", (required["id"],))
-    db.commit()
-    db.close()
+    assert len(rows) == 9
+    assert all(not row["is_required"] for row in rows)
 
-    response = client.post("/application/step/documents", data=_funding_payload(rows))
-    assert response.status_code == 302
-    assert response.headers["Location"].endswith("/application/step/documents")
-
-
-def test_required_document_uploaded_can_continue(client, student):
-    app, rows = _funding_docs(student["student_id"])
-    required = next(r for r in rows if r["is_required"])
-    db = get_db()
-    db.execute("UPDATE documents SET status='Missing', file_path=NULL WHERE id=?", (required["id"],))
-    db.commit()
-    db.close()
-
-    payload = _funding_payload(rows, files={required["id"]: b"%PDF-1.4\n% fictional test document\n"})
-    response = client.post("/application/step/documents", data=payload, content_type="multipart/form-data")
+    response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/application/step/bank")
 
-    db = get_db()
-    saved = db.execute("SELECT * FROM documents WHERE id=?", (required["id"],)).fetchone()
-    db.close()
-    assert saved["status"] == "Uploaded"
-    assert saved["availability"] == "Yes"
+
+def test_funding_document_selected_yes_without_upload_cannot_continue(client, student):
+    app, rows = _funding_docs(student["student_id"])
+    optional = rows[0]
+    payload = {f"document_{optional['id']}_availability": "yes"}
+    response = client.post("/application/step/documents", data=payload)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/application/step/documents")
 
 
 def test_optional_yes_without_upload_cannot_continue(client, student):
@@ -96,22 +82,15 @@ def test_optional_yes_with_upload_can_continue(client, student):
     app, rows = _funding_docs(student["student_id"])
     optional = next(r for r in rows if not r["is_required"])
     db = get_db()
-    # This test isolates optional-document behavior; required documents
-    # are marked complete because the real flow correctly blocks on them.
-    for row in rows:
-        if row["is_required"]:
-            db.execute(
-                "UPDATE documents SET availability='Yes', status='Uploaded', file_path=? WHERE id=?",
-                (f"funding_documents/test-required-{row['id']}.pdf", row["id"]),
-            )
+    # All funding documents are optional, so no other document needs to be
+    # uploaded for this test.
     db.execute("UPDATE documents SET availability=NULL, status='Missing', file_path=NULL WHERE id=?", (optional["id"],))
     db.commit()
     db.close()
 
-    # Only the target optional document is answered "Yes"; all other
-    # optional documents are explicitly answered "No", matching the real
-    # UI where each optional document has its own Yes/No choice.
-    payload = _funding_payload(rows, optional="no")
+    # Only the target optional document is answered "Yes"; the other
+    # documents are left unanswered because every funding document is optional.
+    payload = {}
     payload[f"document_{optional['id']}_availability"] = "yes"
     payload[f"document_{optional['id']}_file"] = (
         io.BytesIO(b"%PDF-1.4\n% fictional optional document\n"), f"test-{optional['id']}.pdf"
@@ -123,22 +102,22 @@ def test_optional_yes_with_upload_can_continue(client, student):
 
 def test_optional_no_can_continue_without_upload(client, student):
     app, rows = _funding_docs(student["student_id"])
-    response = client.post("/application/step/documents", data=_funding_payload(rows, optional="no"))
+    response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/application/step/bank")
 
-    optional = next(r for r in rows if not r["is_required"])
+    optional = rows[0]
     db = get_db()
     saved = db.execute("SELECT availability, status FROM documents WHERE id=?", (optional["id"],)).fetchone()
     db.close()
-    assert saved["availability"] == "No"
+    assert saved["availability"] is None
     assert saved["status"] == "Missing"
 
 
 def test_optional_funding_choice_persists_when_returning(client, student):
     app, rows = _funding_docs(student["student_id"])
     optional = next(r for r in rows if not r["is_required"])
-    response = client.post("/application/step/documents", data=_funding_payload(rows, optional="no"))
+    response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
 
     page = client.get("/application/step/documents")
