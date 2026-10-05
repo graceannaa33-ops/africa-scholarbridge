@@ -100,7 +100,7 @@ def test_optional_yes_with_upload_can_continue(client, student):
     assert response.headers["Location"].endswith("/application/step/bank")
 
 
-def test_optional_no_can_continue_without_upload(client, student):
+def test_optional_documents_can_be_left_unanswered(client, student):
     app, rows = _funding_docs(student["student_id"])
     response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
@@ -117,7 +117,8 @@ def test_optional_no_can_continue_without_upload(client, student):
 def test_optional_funding_choice_persists_when_returning(client, student):
     app, rows = _funding_docs(student["student_id"])
     optional = next(r for r in rows if not r["is_required"])
-    response = client.post("/application/step/documents", data={})
+    payload = {f"document_{optional['id']}_availability": "no"}
+    response = client.post("/application/step/documents", data=payload)
     assert response.status_code == 302
 
     page = client.get("/application/step/documents")
