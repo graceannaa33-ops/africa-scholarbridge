@@ -1807,6 +1807,13 @@ def application_step(step_name):
                 # valid and must not block the applicant from continuing.
                 answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
                 if answer not in ("yes", "no"):
+                    # Blank is a deliberate third state for optional funding
+                    # documents. Keep it as NULL rather than silently turning
+                    # an unanswered item into "No".
+                    db.execute(
+                        "UPDATE documents SET availability = NULL WHERE id = ?",
+                        (row["id"],),
+                    )
                     continue
                 if answer == "no":
                     db.execute(
