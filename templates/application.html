@@ -127,7 +127,7 @@
 
             {% elif step_name == 'documents' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>
-              <p class="text-muted">Required documents must be uploaded before you continue. For optional documents, tell us whether you have them.</p>
+              <p class="text-muted">All documents in this section are optional. You may upload any documents you have, or select No if a document is not available. You can continue without uploading any document.</p>
               {% if missing_documents %}
               <div class="alert alert-warning small" role="alert">Before continuing: {{ missing_documents|join(', ') }}.</div>
               {% endif %}
