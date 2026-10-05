@@ -700,11 +700,12 @@ def get_or_create_draft_application(db, student, cycle):
     db.commit()
     app_id = cur.lastrowid
 
-    # Create the document checklist for this application.
+    # Create the document checklist for this application. All funding
+    # documents are optional under the current policy.
     for doc_type, required in DOCUMENT_CHECKLIST:
         db.execute(
             "INSERT INTO documents (application_id, document_type, is_required, availability) VALUES (?, ?, ?, ?)",
-            (app_id, doc_type, 1 if required else 0, None),
+            (app_id, doc_type, 0, None),
         )
     db.commit()
 
@@ -1802,17 +1803,22 @@ def application_step(step_name):
                 (application["id"],),
             ).fetchall()
             for row in document_rows:
-                if row["is_required"]:
-                    answer = "Yes"
-                else:
-                    answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
-                    if answer not in ("yes", "no"):
-                        flash(f'Please choose Yes or No for "{row["document_type"]}".', "warning")
-                        return redirect(url_for("application_step", step_name="documents"))
-                if answer == "no":
-                    db.execute("UPDATE documents SET availability = 'No' WHERE id = ?", (row["id"],))
+                # Every funding document is optional. An unanswered item is
+                # valid and must not block the applicant from continuing.
+                answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
+                if answer not in ("yes", "no"):
                     continue
-                db.execute("UPDATE documents SET availability = 'Yes' WHERE id = ?", (row["id"],))
+                if answer == "no":
+                    db.execute(
+                        "UPDATE documents SET availability = 'No' WHERE id = ?",
+                        (row["id"],),
+                    )
+                    continue
+
+                db.execute(
+                    "UPDATE documents SET availability = 'Yes' WHERE id = ?",
+                    (row["id"],),
+                )
                 upload = request.files.get(f"document_{row['id']}_file")
                 if upload and upload.filename:
                     stored, error = _save_funding_document(upload)
