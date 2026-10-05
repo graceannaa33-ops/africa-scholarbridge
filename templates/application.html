@@ -93,13 +93,17 @@
                   </div>
                   <div class="form-text">The amount of funding you are requesting. Requested amount only — final funding decisions are subject to review. Next, you'll add your bank account details for disbursement.</div></div>
                 <div class="col-12"><label class="form-label">Household Financial Situation</label>
-                  <textarea name="household_situation" class="form-control" rows="2" placeholder="e.g. Household monthly income about KSh 25,000 (KSh 300,000 a year); expected education cost KSh 100,000">{{ application.household_situation or '' }}</textarea></div>
+                  <textarea name="household_situation" class="form-control" rows="2" placeholder="e.g. My household earns about KSh 25,000 per month, and my education costs are about KSh 100,000 per year.">{{ application.household_situation or '' }}</textarea>
+                  <div class="form-text">Example: Explain your household income, major expenses, and how education costs affect your family.</div></div>
                 <div class="col-md-6"><label class="form-label">Source of Support</label>
-                  <input type="text" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}" placeholder="e.g. Parent/guardian, part-time work"></div>
+                  <input type="text" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}" placeholder="e.g. Parent/guardian, part-time work, self-support">
+                  <div class="form-text">Example: Parent/guardian, sibling, employer, part-time work, or personal savings.</div></div>
                 <div class="col-md-6"><label class="form-label">Estimated Financial Need</label>
-                  <input type="text" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. KSh 75,000"></div>
+                  <input type="text" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. KSh 75,000 per academic year">
+                  <div class="form-text">Example: KSh 75,000 for tuition, accommodation, books, and other education expenses.</div></div>
                 <div class="col-12"><label class="form-label">Funding Already Received (if any)</label>
-                  <textarea name="funding_already_received" class="form-control" rows="2" placeholder="e.g. Example Scholars Program — KSh 50,000">{{ application.funding_already_received or '' }}</textarea></div>
+                  <textarea name="funding_already_received" class="form-control" rows="2" placeholder="e.g. I received KSh 20,000 from a school bursary.">{{ application.funding_already_received or '' }}</textarea>
+                  <div class="form-text">Example: Name of funding received and amount. If none, write “None”.</div></div>
               </div>
 
             {% elif step_name == 'preferences' %}
@@ -123,7 +127,11 @@
             {% elif step_name == 'statement' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Personal Statement</h4>
               <p class="text-muted">Tell us about your educational goals, financial need, career goals, and why funding matters to you and your community.</p>
-              <textarea name="personal_statement" class="form-control" rows="10" placeholder="e.g. Explain your educational goals and why you need funding. Career goal: Software Developer...">{{ application.personal_statement or '' }}</textarea>
+              <div class="alert alert-light border small">
+                <strong>Example:</strong> “My goal is to complete my degree in Information Technology and build a career in software development. My family has limited income, and meeting tuition, accommodation, and learning expenses is difficult. This funding would help me stay in school, complete my studies, and later use my skills to create opportunities for other young people in my community.”
+              </div>
+              <textarea name="personal_statement" class="form-control" rows="10" placeholder="e.g. My educational goal is to... My financial need is... My career goal is... Funding would help me...">{{ application.personal_statement or '' }}</textarea>
+              <div class="form-text">Tip: Aim to explain your education goal, financial need, career goal, and how your education could benefit your community.</div>
 
             {% elif step_name == 'documents' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>
