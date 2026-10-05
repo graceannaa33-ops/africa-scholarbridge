@@ -508,4 +508,15 @@ def test_no_passport_requires_national_id_when_identity_is_required(client, stud
     # VISA_REQUIRED_DOCUMENTS setting is changed.
     upload_visa_support_doc(client, vr["id"], "Passport-size Photograph", make_pdf(["PHOTO"]), "photo.pdf")
     upload_visa_support_doc(client, vr["id"], "National ID", make_pdf(["ID"]), "id.pdf")
-    assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 200          # after both required docs
+    # Every optional document still needs an explicit Yes/No choice.
+    db = get_db()
+    optional_rows = db.execute(
+        "SELECT id FROM visa_documents WHERE request_id = ? AND is_required = 0",
+        (vr["id"],),
+    ).fetchall()
+    db.close()
+    client.post(
+        f"/student-visa/application/{vr['id']}/step/documents",
+        data={f"document_{row['id']}_availability": "no" for row in optional_rows},
+    )
+    assert client.get(f"/student-visa/payment/{vr['id']}").status_code == 200          # after required docs + optional choices
