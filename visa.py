@@ -152,7 +152,9 @@ VISA_REQUIRED_FIELDS = {
     "personal": ["full_name", "date_of_birth", "gender", "citizenship", "country_of_residence"],
     "contact": ["email", "phone"],
     "passport": ["passport_status"],
-    "visa_info": ["destination_country", "visa_category", "purpose_of_travel"],
+    # Purpose of Travel is OPTIONAL (examples are offered on the form);
+    # the destination country and visa type stay required.
+    "visa_info": ["destination_country", "visa_category"],
     "education": ["current_status"],
     "financial": ["trip_payer"],
     "accommodation": [],
@@ -172,6 +174,10 @@ CURRENT_STATUSES = ["Student", "Employed", "Self-Employed / Business Owner", "Un
 TRIP_PAYERS = ["Myself", "Parent/Guardian", "Sponsor", "Employer", "School/University", "Other"]
 FUND_SOURCES = ["Employment Income", "Business Income", "Savings", "Scholarship", "Family Support",
                 "Sponsorship", "Other"]
+# Suggested answers for the optional Purpose of Travel field. Tapping one only
+# fills the text box; the applicant can edit it, type their own, or leave it blank.
+PURPOSE_OF_TRAVEL_SUGGESTIONS = ["Educational purposes", "Study", "University/College education",
+                                 "Attending an academic program", "Research", "Training", "Other"]
 ACCOMMODATION_TYPES = ["Hotel", "University Accommodation", "With Family/Friend", "Rented Accommodation", "Other"]
 YES_NO = ["Yes", "No"]
 ASSISTANCE_OPTIONS = ["DS-160 Guidance", "Document Preparation", "Application Review", "Appointment Guidance",

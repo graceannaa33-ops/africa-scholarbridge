@@ -416,7 +416,7 @@ def seed():
         ("Academic Transcripts", True), ("Certificates", True), ("Admission Letter", False),
         ("Recommendation Letter", True), ("Personal Statement", True), ("CV", True),
         ("Passport / Identity Document", False), ("Proof of Financial Need", False),
-        ("Other Provider-Specific Document", False),
+        ("Provider-Specific Document", False),
     ]
 
     def create_application(student_name, submitted, preferences, statement, funding_type_needed,

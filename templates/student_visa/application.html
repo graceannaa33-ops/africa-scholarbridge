@@ -18,10 +18,11 @@
          {% if type != 'date' %}maxlength="{{ maxlength }}"{% endif %} placeholder="{{ placeholder }}" {{ 'required' if required }}>
   {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
 {%- endmacro %}
-{% macro area(field, label, rows=3, required=False, placeholder="") -%}
+{% macro area(field, label, rows=3, required=False, placeholder="", hint="") -%}
   <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
   <textarea id="f_{{ field }}" name="{{ field }}" class="form-control" rows="{{ rows }}" maxlength="2000"
             placeholder="{{ placeholder }}" {{ 'required' if required }}>{{ visa_request[field] or '' }}</textarea>
+  {% if hint %}<div class="form-text">{{ hint }}</div>{% endif %}
 {%- endmacro %}
 {% macro select(field, label, options, required=False, default=None) -%}
   <label class="form-label" for="f_{{ field }}">{{ label }}{% if required %} <span class="text-danger">*</span>{% endif %}</label>
@@ -261,7 +262,25 @@
               <div class="row g-3">
                 <div class="col-md-6">{{ text('destination_country', 'Country You Want to Visit', required=True, placeholder='e.g. Example Country') }}</div>
                 <div class="col-md-6">{{ select('visa_category', 'Visa Type', v.VISA_TYPES, required=True, default=v.DEFAULT_VISA_TYPE) }}</div>
-                <div class="col-12">{{ area('purpose_of_travel', 'Purpose of Travel', rows=2, required=True, placeholder='e.g. Educational purpose') }}</div>
+                <div class="col-12">
+                  {{ area('purpose_of_travel', 'Purpose of Travel (optional)', rows=2, placeholder='Example: Educational purposes',
+                          hint='Optional — you can leave this blank. Tap a suggestion to fill it in, or type your own.') }}
+                  <div class="d-flex flex-wrap gap-1 mt-1" id="purposeSuggestions">
+                    {% for s in v.PURPOSE_OF_TRAVEL_SUGGESTIONS %}
+                    <button type="button" class="btn btn-sm btn-outline-secondary purpose-suggestion" data-value="{{ s }}">{{ s }}</button>
+                    {% endfor %}
+                  </div>
+                  <script>
+                    document.querySelectorAll('.purpose-suggestion').forEach(function (btn) {
+                      btn.addEventListener('click', function () {
+                        var box = document.getElementById('f_purpose_of_travel');
+                        if (!box) return;
+                        box.value = this.dataset.value === 'Other' ? '' : this.dataset.value;
+                        box.focus();
+                      });
+                    });
+                  </script>
+                </div>
                 <div class="col-md-4">{{ text('intended_arrival_date', 'Intended Date of Arrival', type='date', hint='Example: 01/09/2027') }}</div>
                 <div class="col-md-4">{{ text('intended_departure_date', 'Intended Date of Departure', type='date', hint='Example: 01/06/2031') }}</div>
                 <div class="col-md-4">{{ text('expected_length_of_stay', 'Expected Length of Stay', placeholder='e.g. 4 years') }}</div>
@@ -306,9 +325,10 @@
               <h4 class="fw-bold mb-3">7. Accommodation Information</h4>
               <div class="row g-3">
                 <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay? (optional)', v.ACCOMMODATION_TYPES) }}</div>
-                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation (optional)', placeholder='e.g. Example Student Residence') }}</div>
-                <div class="col-12">{{ area('accommodation_address', 'Address (optional)', rows=2, placeholder='e.g. 123 Example Street, Exampletown') }}</div>
-                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email (optional)', placeholder='e.g. housing@example.com') }}</div>
+                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation (optional)', placeholder='Example: University of Embu Hostels / ABC Hotel / John Doe') }}</div>
+                <div class="col-12">{{ area('accommodation_address', 'Address (optional)', rows=2, placeholder='Example: Embu, Kenya') }}</div>
+                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email (optional)', placeholder='Example: +254 7XX XXX XXX / host@example.com') }}</div>
+                <div class="col-12"><div class="form-text">These accommodation details are optional — you can continue without them.</div></div>
               </div>
 
             {% elif step_name == 'travel_history' %}

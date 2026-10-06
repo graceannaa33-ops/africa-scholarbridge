@@ -43,19 +43,34 @@ def _funding_payload(rows, optional="no", files=None):
     return payload
 
 
-def test_all_funding_documents_are_optional(client, student):
+REQUIRED_FUNDING = {"Academic Transcripts", "Certificates", "Recommendation Letter", "Personal Statement", "CV"}
+
+
+def test_funding_document_requirements_are_five_required_four_optional(client, student):
     app, rows = _funding_docs(student["student_id"])
     assert len(rows) == 9
-    assert all(not row["is_required"] for row in rows)
-
+    assert {row["document_type"] for row in rows if row["is_required"]} == REQUIRED_FUNDING
+    # The fixture uploaded the required documents, so optional ones may be left blank.
     response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/application/step/bank")
 
 
+def test_missing_required_funding_document_cannot_continue(client, student):
+    app, rows = _funding_docs(student["student_id"])
+    required = next(r for r in rows if r["is_required"])
+    db = get_db()
+    db.execute("UPDATE documents SET status='Missing', file_path=NULL WHERE id=?", (required["id"],))
+    db.commit()
+    db.close()
+    response = client.post("/application/step/documents", data={})
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/application/step/documents")
+
+
 def test_funding_document_selected_yes_without_upload_cannot_continue(client, student):
     app, rows = _funding_docs(student["student_id"])
-    optional = rows[0]
+    optional = next(r for r in rows if not r["is_required"])
     payload = {f"document_{optional['id']}_availability": "yes"}
     response = client.post("/application/step/documents", data=payload)
     assert response.status_code == 302
@@ -102,11 +117,15 @@ def test_optional_yes_with_upload_can_continue(client, student):
 
 def test_optional_documents_can_be_left_unanswered(client, student):
     app, rows = _funding_docs(student["student_id"])
+    optional = next(r for r in rows if not r["is_required"])
+    db = get_db()
+    db.execute("UPDATE documents SET availability=NULL WHERE id=?", (optional["id"],))
+    db.commit()
+    db.close()
     response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/application/step/bank")
 
-    optional = rows[0]
     db = get_db()
     saved = db.execute("SELECT availability, status FROM documents WHERE id=?", (optional["id"],)).fetchone()
     db.close()

@@ -1,16 +1,20 @@
 """End-to-end behaviour of the annual funding application flow:
 
-  Funding documents   - all nine optional; blank stays NULL, No / Yes saved,
-                        Yes without an upload blocks, nothing is lost.
-  Financial (Step 4)  - guidance shown, fields persist, amount validated.
-  Statement (Step 6)  - guidance shown, the example is never saved.
+  Education (Step 2)  - six required fields; Additional Academic Information optional.
+  Funding need        - Not Needed / Partial / Full per category, incl. Other.
+  Financial (Step 4)  - Estimated Financial Need + requested amount required;
+                        everything else optional; examples never saved.
+  Statement (Step 6)  - optional; the example is never saved.
+  Funding documents   - 5 required (must be uploaded), 4 optional (blank stays
+                        NULL, No / Yes saved, Yes without an upload blocks).
   Bank / disbursement - required fields enforced at save, confirm, Review and
                         submission; mobile money never replaces the bank
                         account; Edit re-opens a pre-filled form; the full
                         account number never reaches a page.
   Visa                - still the final step; required photo / National ID,
-                        optional Yes/No rules, Purpose of Travel and the
-                        payment gate unchanged; no duplicate requests.
+                        optional Yes/No rules and the payment gate unchanged;
+                        Purpose of Travel and accommodation details optional;
+                        no duplicate requests.
 
 All test data is fictional.
 """
@@ -22,9 +26,9 @@ import pytest
 
 import app as app_module
 import database
-from conftest import (APPLICANT, PNG_BYTES, TEST_BANK_DETAILS, VISA_FORM_ANSWERS, choose_yes,
-                      complete_bank_step, count_applications, get_application, upload,
-                      visa_request_for, visa_requests_for)
+from conftest import (APPLICANT, COMPLETE_EDUCATION, PNG_BYTES, TEST_BANK_DETAILS, VISA_FORM_ANSWERS,
+                      choose_yes, complete_bank_step, count_applications, funding_documents_payload,
+                      get_application, upload, visa_request_for, visa_requests_for)
 from database import get_db
 
 FUNDING_DOCUMENTS = [
@@ -32,6 +36,10 @@ FUNDING_DOCUMENTS = [
     "Personal Statement", "CV", "Passport / Identity Document", "Proof of Financial Need",
     "Provider-Specific Document",
 ]
+REQUIRED_DOCUMENTS = ["Academic Transcripts", "Certificates", "Recommendation Letter", "Personal Statement", "CV"]
+OPTIONAL_DOCUMENTS = ["Admission Letter", "Passport / Identity Document", "Proof of Financial Need",
+                      "Provider-Specific Document"]
+FINANCIAL_OK = {"requested_amount_ksh": "75,000", "estimated_financial_need": "KSh 150,000 per academic year"}
 PDF_BYTES = b"%PDF-1.4\n% fictional test document\n"
 FULL_ACCOUNT_NUMBER = TEST_BANK_DETAILS["account_number"]
 
@@ -83,11 +91,9 @@ def drafter(client):
     client.get("/application/start")
     client.post("/application/step/personal", data={"full_name": "Alex Testperson", "date_of_birth": "2000-01-01",
                                                     "country": "Kenya", "phone": "+254 700 000 001", "email": email})
-    client.post("/application/step/education", data={"institution": "Example University",
-                                                     "education_level": "Undergraduate",
-                                                     "course": "Bachelor of Information Technology"})
+    client.post("/application/step/education", data=COMPLETE_EDUCATION)
     client.post("/application/step/funding_need", data={"funding_type_needed": "Full tuition"})
-    client.post("/application/step/financial", data={"requested_amount_ksh": "75,000"})
+    client.post("/application/step/financial", data=FINANCIAL_OK)
     client.post("/application/step/preferences", data={"preferences": ["Scholarship"]})
     client.post("/application/step/statement", data={"personal_statement": "A fictional statement."})
     sid = q("SELECT s.id FROM students s JOIN users u ON u.id = s.user_id WHERE u.email = ?", (email,))[0][0]
@@ -99,228 +105,370 @@ def doc_field(row, suffix):
     return f"document_{row['id']}_{suffix}"
 
 
+def required_uploads(application_id, **extra):
+    """Documents-step form data uploading every REQUIRED document, plus extra fields."""
+    payload = funding_documents_payload(application_id, optional=None)
+    payload.update(extra)
+    return payload
+
+
+def post_documents(client, data):
+    return client.post("/application/step/documents", data=data, content_type="multipart/form-data")
+
+
 # =====================================================================
-# 1-2. FUNDING DOCUMENTS - all nine optional
+# STEP 7 - FUNDING DOCUMENTS: 5 required, 4 optional
 # =====================================================================
-def test_all_nine_funding_documents_exist_and_are_optional(client, drafter):
+def test_document_requirements_are_exactly_five_required_and_four_optional(client, drafter):
     rows = docs(drafter["application_id"])
     assert list(rows) == FUNDING_DOCUMENTS
-    assert all(r["is_required"] == 0 for r in rows.values())
-    assert all(r["availability"] is None for r in rows.values())
-    assert all(required is False for _, required in app_module.DOCUMENT_CHECKLIST)
+    assert sorted(n for n, r in rows.items() if r["is_required"]) == sorted(REQUIRED_DOCUMENTS)
+    assert sorted(n for n, r in rows.items() if not r["is_required"]) == sorted(OPTIONAL_DOCUMENTS)
+    assert dict(app_module.DOCUMENT_CHECKLIST) == {n: n in REQUIRED_DOCUMENTS for n in FUNDING_DOCUMENTS}
+    assert tuple(database.REQUIRED_FUNDING_DOCUMENTS) == tuple(REQUIRED_DOCUMENTS)
 
 
-def test_documents_page_shows_optional_for_every_document_and_the_explanation(client, drafter):
+def _requirement_badges(page):
+    """{document name: 'Required' / 'Optional'} as rendered on the Documents step."""
+    out = {}
+    for block in page.split('data-document-requirement="')[1:]:
+        kind = block.split('"', 1)[0]
+        name = block.split("<strong>", 1)[1].split("</strong>", 1)[0]
+        badge = "Required" if 'bg-danger">Required<' in block.split("</span> </span>", 1)[0] else "Optional"
+        assert badge.lower() == kind, name
+        out[name] = badge
+    return out
+
+
+def test_documents_step_labels_each_document_correctly(client, drafter):
     page = html(client, "/application/step/documents")
-    assert ("All documents in this section are optional. You may upload any documents you have, or select No "
-            "if a document is not available. You can continue without uploading any document.") in page
-    assert page.count('<span class="badge bg-secondary">Optional</span>') == 9
-    assert ">Required<" not in page
-    assert page.count("Do you have this document?") == 9
-    assert page.count("Yes, I have it") == 9 and page.count("No, I don't have it") == 9
-    # Nothing is pre-selected and no upload is forced while unanswered.
-    assert " checked" not in page.split('id="fundingDocumentChecklist"')[1].split("</form>")[0]
-    assert "funding-doc-file\" accept=\".pdf,.jpg,.jpeg,.png\" required" not in page
+    assert _requirement_badges(page) == {n: ("Required" if n in REQUIRED_DOCUMENTS else "Optional")
+                                         for n in FUNDING_DOCUMENTS}
+    assert "a missing optional document never stops your application" in page
+    # Required documents have an upload field marked required; optional ones a Yes/No choice.
+    assert page.count("Do you have this document?") == 4
+    for name in REQUIRED_DOCUMENTS:
+        row = docs(drafter["application_id"])[name]
+        assert f'name="{doc_field(row, "file")}" class="form-control" accept=".pdf,.jpg,.jpeg,.png" required' in page
+        assert f'name="{doc_field(row, "availability")}"' not in page
 
 
-def test_unanswered_documents_continue_and_stay_null(client, drafter):
-    r = client.post("/application/step/documents", data={})
-    assert r.status_code == 302 and r.headers["Location"].endswith("/application/step/bank")
+@pytest.mark.parametrize("missing", REQUIRED_DOCUMENTS)
+def test_each_required_document_is_enforced(client, drafter, missing):
     rows = docs(drafter["application_id"])
-    assert all(row["availability"] is None for row in rows.values())     # never turned into "No"
-    assert all(row["status"] == "Missing" for row in rows.values())
-    # ...and still NULL after coming back / refreshing the page.
-    client.get("/application/step/documents")
-    client.get("/application/step/documents")
-    assert all(row["availability"] is None for row in docs(drafter["application_id"]).values())
+    data = required_uploads(drafter["application_id"])
+    del data[doc_field(rows[missing], "file")]
+    r = post_documents(client, data)
+    assert r.headers["Location"].endswith("/application/step/documents")
+    assert f"{missing} — Required: please upload this document." in flashes(client)
+    saved = docs(drafter["application_id"])
+    assert saved[missing]["status"] == "Missing"
+    # The other required uploads in the same submit were kept.
+    assert all(saved[n]["status"] == "Uploaded" for n in REQUIRED_DOCUMENTS if n != missing)
 
 
-def test_no_is_saved_as_no_and_shown_again(client, drafter):
+def test_required_document_cannot_be_skipped_by_answering_no(client, drafter):
     rows = docs(drafter["application_id"])
-    cv = rows["CV"]
-    r = client.post("/application/step/documents", data={doc_field(cv, "availability"): "no"})
+    data = {doc_field(rows[n], "availability"): "no" for n in REQUIRED_DOCUMENTS}
+    r = post_documents(client, data)
+    assert r.headers["Location"].endswith("/application/step/documents")
+    assert all(docs(drafter["application_id"])[n]["status"] == "Missing" for n in REQUIRED_DOCUMENTS)
+
+
+def test_required_uploaded_and_all_optional_missing_can_continue(client, drafter):
+    r = post_documents(client, required_uploads(drafter["application_id"]))
     assert r.headers["Location"].endswith("/application/step/bank")
     saved = docs(drafter["application_id"])
-    assert saved["CV"]["availability"] == "No"
-    assert all(saved[t]["availability"] is None for t in FUNDING_DOCUMENTS if t != "CV")
-    page = client.get("/application/step/documents").get_data(as_text=True)
-    assert f'id="doc_{cv["id"]}_no" data-upload-target="upload_{cv["id"]}" checked' in page
+    for name in OPTIONAL_DOCUMENTS:                       # missing + unanswered never blocks
+        assert saved[name]["status"] == "Missing" and saved[name]["availability"] is None
+    for name in REQUIRED_DOCUMENTS:
+        assert saved[name]["status"] == "Uploaded"
+        stored = saved[name]["file_path"]
+        assert stored.startswith("funding_documents/") and "required" not in stored   # randomised name
+        assert os.path.isfile(os.path.join(app_module.FUNDING_DOCS_DIR, os.path.basename(stored)))
 
 
-@pytest.mark.parametrize("doc_type", FUNDING_DOCUMENTS)
-def test_yes_without_upload_blocks_for_every_document(client, drafter, doc_type):
-    row = docs(drafter["application_id"])[doc_type]
-    r = client.post("/application/step/documents", data={doc_field(row, "availability"): "yes"})
-    assert r.headers["Location"].endswith("/application/step/documents")
-    assert f"{doc_type} — you selected Yes, so please upload the document." in flashes(client)
-    assert docs(drafter["application_id"])[doc_type]["availability"] == "Yes"
-    assert get_application(drafter["student_id"])["current_step"] <= app_module.APPLICATION_STEPS.index("documents") + 1
-
-
-def test_yes_without_upload_keeps_the_other_answers_from_the_same_submit(client, drafter):
+@pytest.mark.parametrize("optional", OPTIONAL_DOCUMENTS)
+def test_each_optional_document_can_be_missing_without_blocking(client, drafter, optional):
     rows = docs(drafter["application_id"])
-    data = {doc_field(rows["CV"], "availability"): "yes",                       # blocks
-            doc_field(rows["Certificates"], "availability"): "no",
-            doc_field(rows["Admission Letter"], "availability"): "yes",
-            doc_field(rows["Admission Letter"], "file"): (io.BytesIO(PDF_BYTES), "admission.pdf")}
-    r = client.post("/application/step/documents", data=data, content_type="multipart/form-data")
+    for answer in (None, "no"):
+        data = required_uploads(drafter["application_id"])
+        if answer:
+            data[doc_field(rows[optional], "availability")] = answer
+        r = post_documents(client, data)
+        assert r.headers["Location"].endswith("/application/step/bank"), answer
+        expected = None if answer is None else "No"
+        assert docs(drafter["application_id"])[optional]["availability"] == expected   # blank stays NULL
+
+
+@pytest.mark.parametrize("optional", OPTIONAL_DOCUMENTS)
+def test_optional_yes_without_upload_blocks_and_yes_with_upload_continues(client, drafter, optional):
+    row = docs(drafter["application_id"])[optional]
+    r = post_documents(client, required_uploads(drafter["application_id"], **{doc_field(row, "availability"): "yes"}))
     assert r.headers["Location"].endswith("/application/step/documents")
-    saved = docs(drafter["application_id"])
-    assert saved["Certificates"]["availability"] == "No"
-    assert saved["Admission Letter"]["status"] == "Uploaded"
-    assert saved["CV"]["availability"] == "Yes" and saved["CV"]["status"] == "Missing"
-    # The page then explains exactly what is still needed.
-    assert "CV — you selected Yes, so please upload the document." in html(client, "/application/step/documents")
-
-
-def test_yes_with_upload_continues_and_stores_the_file_safely(client, drafter):
-    row = docs(drafter["application_id"])["Academic Transcripts"]
-    r = client.post("/application/step/documents",
-                    data={doc_field(row, "availability"): "yes",
-                          doc_field(row, "file"): (io.BytesIO(PDF_BYTES), "../../my transcripts.pdf")},
-                    content_type="multipart/form-data")
+    assert f"{optional} — you selected Yes, so please upload the document." in flashes(client)
+    assert docs(drafter["application_id"])[optional]["availability"] == "Yes"
+    r = post_documents(client, {doc_field(row, "availability"): "yes",
+                                doc_field(row, "file"): (io.BytesIO(PDF_BYTES), "optional.pdf")})
     assert r.headers["Location"].endswith("/application/step/bank")
-    saved = docs(drafter["application_id"])["Academic Transcripts"]
-    assert saved["availability"] == "Yes" and saved["status"] == "Uploaded"
-    stored = saved["file_path"]
-    assert stored.startswith("funding_documents/") and "transcripts" not in stored   # randomised name
-    path = os.path.join(app_module.FUNDING_DOCS_DIR, os.path.basename(stored))
-    assert os.path.isfile(path)
-    assert "static" not in os.path.relpath(path, os.path.dirname(app_module.__file__)).split(os.sep)
+    assert docs(drafter["application_id"])[optional]["status"] == "Uploaded"
 
 
-def test_fake_file_is_rejected_but_other_answers_are_kept(client, drafter):
+def test_problems_never_discard_other_answers_from_the_same_submit(client, drafter):
     rows = docs(drafter["application_id"])
-    r = client.post("/application/step/documents",
-                    data={doc_field(rows["CV"], "availability"): "yes",
-                          doc_field(rows["CV"], "file"): (io.BytesIO(b"MZ not a pdf"), "cv.pdf"),
-                          doc_field(rows["Certificates"], "availability"): "no"},
-                    content_type="multipart/form-data")
+    r = post_documents(client, {
+        doc_field(rows["CV"], "file"): (io.BytesIO(PDF_BYTES), "cv.pdf"),                 # saved
+        doc_field(rows["Certificates"], "file"): (io.BytesIO(b"MZ not a pdf"), "c.pdf"),  # rejected
+        doc_field(rows["Proof of Financial Need"], "availability"): "no",                  # saved
+    })
     assert r.headers["Location"].endswith("/application/step/documents")
     saved = docs(drafter["application_id"])
-    assert saved["CV"]["status"] == "Missing" and saved["CV"]["file_path"] is None
-    assert saved["Certificates"]["availability"] == "No"
+    assert saved["CV"]["status"] == "Uploaded"
+    assert saved["Certificates"]["status"] == "Missing" and saved["Certificates"]["file_path"] is None
+    assert saved["Proof of Financial Need"]["availability"] == "No"
 
 
 def test_existing_uploads_stay_intact_on_later_submits(client, drafter):
-    row = docs(drafter["application_id"])["Recommendation Letter"]
-    client.post("/application/step/documents",
-                data={doc_field(row, "availability"): "yes",
-                      doc_field(row, "file"): (io.BytesIO(PDF_BYTES), "letter.pdf")},
-                content_type="multipart/form-data")
-    before = docs(drafter["application_id"])["Recommendation Letter"]
-    # Coming back and continuing with "Yes" but no new file keeps the upload.
-    r = client.post("/application/step/documents", data={doc_field(row, "availability"): "yes"})
+    post_documents(client, required_uploads(drafter["application_id"]))
+    before = docs(drafter["application_id"])
+    r = post_documents(client, {})                       # coming back, nothing new
     assert r.headers["Location"].endswith("/application/step/bank")
-    after = docs(drafter["application_id"])["Recommendation Letter"]
-    assert after["file_path"] == before["file_path"] and after["status"] == "Uploaded"
-    assert os.path.isfile(os.path.join(app_module.FUNDING_DOCS_DIR, os.path.basename(after["file_path"])))
-    # Answering "No" later never deletes the stored file either.
-    client.post("/application/step/documents", data={doc_field(row, "availability"): "no"})
-    after_no = docs(drafter["application_id"])["Recommendation Letter"]
-    assert after_no["file_path"] == before["file_path"]
-    assert os.path.isfile(os.path.join(app_module.FUNDING_DOCS_DIR, os.path.basename(after_no["file_path"])))
+    after = docs(drafter["application_id"])
+    for name in REQUIRED_DOCUMENTS:
+        assert after[name]["file_path"] == before[name]["file_path"]
+        assert os.path.isfile(os.path.join(app_module.FUNDING_DOCS_DIR, os.path.basename(after[name]["file_path"])))
 
 
-def test_old_required_document_records_are_migrated_to_optional(client, drafter):
+def test_existing_rows_from_any_earlier_policy_are_corrected(client, drafter):
     rows = docs(drafter["application_id"])
-    legacy = ["Academic Transcripts", "Certificates", "Recommendation Letter", "Personal Statement", "CV"]
-    for name in legacy:
-        execute("UPDATE documents SET is_required = 1 WHERE id = ?", (rows[name]["id"],))
-    execute("UPDATE documents SET status = 'Uploaded', availability = 'Yes', file_path = 'funding_documents/legacy.pdf' "
+    # Earlier all-optional policy for the required five, and a wrongly-required optional one.
+    execute("UPDATE documents SET is_required = 0 WHERE application_id = ?", (drafter["application_id"],))
+    execute("UPDATE documents SET is_required = 1 WHERE id = ?", (rows["Admission Letter"]["id"],))
+    execute("UPDATE documents SET status = 'Uploaded', availability = 'Yes', file_path = 'funding_documents/kept.pdf' "
             "WHERE id = ?", (rows["CV"]["id"],))
+    execute("UPDATE documents SET availability = 'No' WHERE id = ?", (rows["Proof of Financial Need"]["id"],))
 
-    database.init_db()   # the startup migration (runs on every deploy)
+    database.init_db()   # startup migration
 
     migrated = docs(drafter["application_id"])
-    assert all(migrated[n]["is_required"] == 0 for n in FUNDING_DOCUMENTS)
-    assert migrated["Academic Transcripts"]["availability"] is None          # unanswered stays NULL
-    assert migrated["CV"]["file_path"] == "funding_documents/legacy.pdf"    # upload kept
-    assert migrated["CV"]["availability"] == "Yes" and migrated["CV"]["status"] == "Uploaded"
-    r = client.post("/application/step/documents", data={doc_field(rows["CV"], "availability"): "yes"})
-    assert r.headers["Location"].endswith("/application/step/bank")
+    assert {n for n, r in migrated.items() if r["is_required"]} == set(REQUIRED_DOCUMENTS)
+    assert migrated["CV"]["file_path"] == "funding_documents/kept.pdf"          # upload kept
+    assert migrated["Proof of Financial Need"]["availability"] == "No"          # answer kept
+    assert migrated["Admission Letter"]["availability"] is None                 # blank stays NULL
 
 
-def test_step_visit_also_migrates_an_old_required_row(client, drafter):
+def test_step_visit_also_corrects_a_row(client, drafter):
     rows = docs(drafter["application_id"])
-    execute("UPDATE documents SET is_required = 1 WHERE id = ?", (rows["Certificates"]["id"],))
-    page = html(client, "/application/step/documents")
-    assert ">Required<" not in page
-    assert docs(drafter["application_id"])["Certificates"]["is_required"] == 0
+    execute("UPDATE documents SET is_required = 1 WHERE id = ?", (rows["Admission Letter"]["id"],))
+    execute("UPDATE documents SET is_required = 0 WHERE id = ?", (rows["CV"]["id"],))
+    client.get("/application/step/documents")
+    fixed = docs(drafter["application_id"])
+    assert fixed["Admission Letter"]["is_required"] == 0 and fixed["CV"]["is_required"] == 1
 
 
-def test_standalone_documents_page_has_no_required_state(client, drafter):
+def test_standalone_documents_page_shows_requirement_and_status(client, drafter):
+    post_documents(client, required_uploads(drafter["application_id"]))
     page = html(client, "/documents")
-    assert ">Required<" not in page
+    for name in FUNDING_DOCUMENTS:
+        block = page.split(f"<strong>{name}</strong>", 1)[1].split("</div>", 1)[0]
+        assert ("Required" if name in REQUIRED_DOCUMENTS else "Optional") in block, name
+        assert ("Uploaded" if name in REQUIRED_DOCUMENTS else "Missing") in block, name
     assert "Please choose Yes or No" not in page
-    assert page.count("Not answered (optional)") == 9
 
 
-def test_no_backend_rule_requires_a_funding_document():
-    blank = [{"document_type": n, "availability": None, "status": "Missing"} for n in FUNDING_DOCUMENTS]
-    no = [{"document_type": n, "availability": "No", "status": "Missing"} for n in FUNDING_DOCUMENTS]
-    assert app_module._missing_funding_documents(blank) == []
-    assert app_module._missing_funding_documents(no) == []
-    yes = [{"document_type": "CV", "availability": "Yes", "status": "Missing"}]
-    assert app_module._missing_funding_documents(yes) == ["CV — you selected Yes, so please upload the document."]
+def test_missing_document_rules_unit():
+    def d(name, required, availability=None, status="Missing"):
+        return {"document_type": name, "is_required": required, "availability": availability, "status": status}
+    assert app_module._missing_funding_documents([d(n, False) for n in OPTIONAL_DOCUMENTS]) == []
+    assert app_module._missing_funding_documents([d(n, False, "No") for n in OPTIONAL_DOCUMENTS]) == []
+    assert app_module._missing_funding_documents([d("CV", True, status="Uploaded")]) == []
+    assert app_module._missing_funding_documents([d("CV", True)]) == ["CV — Required: please upload this document."]
+    assert app_module._missing_funding_documents([d("Admission Letter", False, "Yes")]) == [
+        "Admission Letter — you selected Yes, so please upload the document."]
 
 
 # =====================================================================
-# 3-4. STEP 4 - FINANCIAL INFORMATION + REQUESTED AMOUNT
+# STEP 2 - EDUCATION
 # =====================================================================
-def test_financial_step_title_examples_and_guidance(client, drafter):
+EDUCATION_REQUIRED = ["institution", "education_level", "course", "field_of_study", "year_of_study",
+                      "graduation_year"]
+
+
+def test_education_marks_six_required_fields_and_academic_info_optional(client, drafter):
+    page = html(client, "/application/step/education")
+    for name in EDUCATION_REQUIRED:
+        tag = page.split(f'name="{name}"', 1)[1].split(">", 1)[0]
+        assert "required" in tag, name
+    tag = page.split('name="academic_info"', 1)[1].split(">", 1)[0]
+    assert "required" not in tag
+    assert "Additional Academic Information <span class=\"text-muted small\">(optional)</span>" in page
+    assert ('placeholder="Example: Relevant academic achievements, awards, scholarships, challenges, or any '
+            'additional information about your studies."') in page
+    for level in ("Undergraduate", "Master&#39;s", "PhD", "Vocational/Technical", "High School"):
+        assert f">{level}</option>" in page
+
+
+def test_additional_academic_information_can_be_blank(client, drafter):
+    r = client.post("/application/step/education", data={**COMPLETE_EDUCATION, "academic_info": ""})
+    assert r.headers["Location"].endswith("/application/step/funding_need")
+    assert get_application(drafter["student_id"])["academic_info"] is None
+    assert "Example: Relevant academic achievements" not in (get_application(drafter["student_id"])["academic_info"] or "")
+
+
+@pytest.mark.parametrize("field", EDUCATION_REQUIRED)
+def test_each_required_education_field_is_enforced(client, drafter, field):
+    r = client.post("/application/step/education", data={**COMPLETE_EDUCATION, field: "  "})
+    assert r.headers["Location"].endswith("/application/step/education")
+    assert "Please complete the required Education fields" in flashes(client)
+    saved = get_application(drafter["student_id"])
+    assert saved[field] is None
+    # What WAS entered is still saved, so nothing has to be retyped.
+    other = next(f for f in EDUCATION_REQUIRED if f != field and f != "education_level")
+    assert saved[other] == COMPLETE_EDUCATION[other]
+
+
+def test_education_level_must_be_one_of_the_listed_levels(client, drafter):
+    r = client.post("/application/step/education", data={**COMPLETE_EDUCATION, "education_level": "Kindergarten"})
+    assert r.headers["Location"].endswith("/application/step/education")
+    assert get_application(drafter["student_id"])["education_level"] is None
+
+
+# =====================================================================
+# STEP 3 - FUNDING NEED
+# =====================================================================
+NEEDS = {"tuition_need": "Full", "accommodation_need": "Partial", "living_expenses_need": "Not Needed",
+         "books_need": "Partial", "transport_need": "Not Needed", "technology_need": "Full"}
+
+
+def test_funding_need_offers_one_choice_per_category_including_other(client, drafter):
+    page = html(client, "/application/step/funding_need")
+    for f in [*NEEDS, "other_expenses_need"]:
+        select = page.split(f'name="{f}"', 1)[1].split("</select>", 1)[0]
+        assert select.count("<option") == 3 and all(f">{lvl}<" in select for lvl in ("Not Needed", "Partial", "Full")), f
+    assert ('placeholder="Please specify: e.g. examination fees, research costs, internet/data, '
+            'medical/education-related expenses, etc."') in page
+
+
+def test_funding_selections_save_and_show_again(client, drafter):
+    data = {"funding_type_needed": "Partial support", **NEEDS, "other_expenses_need": "Partial",
+            "other_expenses": "Examination fees"}
+    r = client.post("/application/step/funding_need", data=data)
+    assert r.headers["Location"].endswith("/application/step/financial")
+    saved = get_application(drafter["student_id"])
+    for f, v in {**NEEDS, "other_expenses_need": "Partial", "other_expenses": "Examination fees"}.items():
+        assert saved[f] == v, f
+    page = client.get("/application/step/funding_need").get_data(as_text=True)
+    for f, v in {**NEEDS, "other_expenses_need": "Partial"}.items():
+        select = page.split(f'name="{f}"', 1)[1].split("</select>", 1)[0]
+        assert f'value="{v}" selected' in select, f
+    assert "Examination fees" in page
+
+
+def test_other_education_expenses_can_be_blank_when_not_needed(client, drafter):
+    r = client.post("/application/step/funding_need", data={**NEEDS, "other_expenses_need": "Not Needed",
+                                                            "other_expenses": ""})
+    assert r.headers["Location"].endswith("/application/step/financial")
+    saved = get_application(drafter["student_id"])
+    assert saved["other_expenses_need"] == "Not Needed" and saved["other_expenses"] is None
+
+
+def test_other_education_expenses_must_be_specified_when_needed(client, drafter):
+    r = client.post("/application/step/funding_need", data={**NEEDS, "other_expenses_need": "Full",
+                                                            "other_expenses": ""})
+    assert r.headers["Location"].endswith("/application/step/funding_need")
+    assert "please specify the expense" in flashes(client)
+    assert get_application(drafter["student_id"])["tuition_need"] == "Full"      # rest still saved
+
+
+def test_tampered_funding_level_is_not_stored(client, drafter):
+    client.post("/application/step/funding_need", data={**NEEDS, "tuition_need": "<script>"})
+    assert get_application(drafter["student_id"])["tuition_need"] is None
+
+
+# =====================================================================
+# STEP 4 - FINANCIAL INFORMATION + REQUESTED AMOUNT
+# =====================================================================
+def test_financial_step_required_optional_and_examples(client, drafter):
     assert app_module.APPLICATION_STEPS.index("financial") == 3
     assert app_module.APPLICATION_STEP_TITLES["financial"] == "Financial Information"
     page = html(client, "/application/step/financial")
     assert "Step 4 — Financial Information<" in page
     for text in (
-        "e.g. My household earns about KSh 25,000 per month, and my education costs are about KSh 100,000 per year.",
-        "Example: Explain your household income, major expenses, and how education costs affect your family.",
-        "e.g. Parent/guardian, part-time work, sibling, employer, or personal savings",
-        "Example: Parent/guardian, sibling, employer, part-time work, or personal savings.",
-        "e.g. KSh 75,000 per academic year",
-        "Example: KSh 75,000 for tuition, accommodation, books, and other education expenses.",
-        "e.g. I received KSh 20,000 from a school bursary.",
-        "Example: Name of funding received and amount. If none, write",
+        'placeholder="Example: KSh 150,000 per academic year"',
+        ("placeholder=\"Example: Describe your household's financial situation, including income challenges, "
+         "dependants, or circumstances affecting your ability to fund your education.\""),
+        'placeholder="Example: HELB KSh 50,000, partial scholarship KSh 30,000, or None"',
         "Requested amount only — final funding decisions are subject to review.",
-        'name="requested_amount_ksh"',
     ):
         assert text in page, text
+    for opt in ("Parents/Guardians", "Self-funded", "Family Members", "Scholarship", "HELB/HEF",
+                "Part-time Employment", "Sponsor/Organization", "Other"):
+        assert f'name="source_of_support" value="{opt}"' in page, opt
+    assert 'name="source_of_support_other"' in page
+    for name, required in (("estimated_financial_need", True), ("requested_amount_ksh", True),
+                           ("household_situation", False), ("funding_already_received", False),
+                           ("source_of_support_other", False)):
+        tag = page.split(f'name="{name}"', 1)[1].split(">", 1)[0]
+        assert ("required" in tag) == required, name
+
+
+def test_estimated_financial_need_is_still_required(client, drafter):
+    execute("UPDATE funding_applications SET estimated_financial_need = NULL WHERE id = ?", (drafter["application_id"],))
+    r = client.post("/application/step/financial", data={**FINANCIAL_OK, "estimated_financial_need": "   ",
+                                                         "household_situation": "Kept anyway"})
+    assert r.headers["Location"].endswith("/application/step/financial")
+    assert "Estimated Financial Need is required" in flashes(client)
+    saved = get_application(drafter["student_id"])
+    assert saved["estimated_financial_need"] is None
+    assert saved["household_situation"] == "Kept anyway"          # nothing typed is lost
+
+
+def test_optional_financial_fields_can_all_be_blank(client, drafter):
+    r = client.post("/application/step/financial", data={**FINANCIAL_OK, "household_situation": "",
+                                                         "source_of_support_other": "", "funding_already_received": ""})
+    assert r.headers["Location"].endswith("/application/step/preferences")
+    saved = get_application(drafter["student_id"])
+    for f in ("household_situation", "source_of_support", "funding_already_received"):
+        assert saved[f] is None, f                                 # blank, never an example
+
+
+def test_funding_already_received_can_be_blank(client, drafter):
+    r = client.post("/application/step/financial", data={**FINANCIAL_OK, "funding_already_received": ""})
+    assert r.headers["Location"].endswith("/application/step/preferences")
+    assert get_application(drafter["student_id"])["funding_already_received"] is None
 
 
 def test_financial_fields_save_and_persist(client, drafter):
-    values = {"requested_amount_ksh": "KES 80000",
-              "household_situation": "Fictional: household earns KSh 30,000 per month.",
-              "source_of_support": "Fictional sibling support",
-              "estimated_financial_need": "KSh 90,000 per academic year",
-              "funding_already_received": "None"}
-    r = client.post("/application/step/financial", data=values)
+    data = {"requested_amount_ksh": "KES 80000", "estimated_financial_need": "KSh 150,000 per academic year",
+            "household_situation": "Fictional: two dependants, one income.",
+            "source_of_support": ["Parents/Guardians", "HELB/HEF", "Other"],
+            "source_of_support_other": "Church bursary", "funding_already_received": "HELB KSh 50,000"}
+    r = client.post("/application/step/financial", data=data)
     assert r.headers["Location"].endswith("/application/step/preferences")
-    app_row = get_application(drafter["student_id"])
-    assert app_row["requested_amount_ksh"] == 80000
-    for f in ("household_situation", "source_of_support", "estimated_financial_need", "funding_already_received"):
-        assert app_row[f] == values[f]
-    # Leaving, refreshing and coming back shows the saved values again.
+    saved = get_application(drafter["student_id"])
+    assert saved["requested_amount_ksh"] == 80000
+    assert saved["source_of_support"] == "Parents/Guardians, HELB/HEF, Other: Church bursary"
+    assert saved["funding_already_received"] == "HELB KSh 50,000"
     client.get("/application/step/personal")
     page = client.get("/application/step/financial").get_data(as_text=True)
-    assert 'value="80,000"' in page
-    for f in ("household_situation", "source_of_support", "estimated_financial_need", "funding_already_received"):
-        assert values[f] in page
+    assert 'value="80,000"' in page and "KSh 150,000 per academic year" in page
+    for opt in ("Parents/Guardians", "HELB/HEF", "Other"):
+        assert f'value="{opt}" id="support_' in page and \
+            page.split(f'value="{opt}" id="support_', 1)[1].split(">", 1)[0].rstrip().endswith("checked"), opt
+    assert 'value="Church bursary"' in page
 
 
-def test_blank_financial_fields_do_not_save_the_examples(client, drafter):
-    client.post("/application/step/financial", data={"requested_amount_ksh": "75000", "household_situation": "",
-                                                     "source_of_support": "", "estimated_financial_need": "",
-                                                     "funding_already_received": ""})
-    app_row = get_application(drafter["student_id"])
-    for f in ("household_situation", "source_of_support", "estimated_financial_need", "funding_already_received"):
-        assert not app_row[f]
+def test_older_free_text_source_of_support_is_kept_when_editing(client, drafter):
+    execute("UPDATE funding_applications SET source_of_support = 'Family and personal savings' WHERE id = ?",
+            (drafter["application_id"],))
+    page = client.get("/application/step/financial").get_data(as_text=True)
+    assert 'value="Family and personal savings"' in page          # shown in the Other box, not lost
 
 
 @pytest.mark.parametrize("raw,saved", [("75,000", 75000), ("75000", 75000), ("KSh 75,000", 75000),
                                        ("KES 75000", 75000)])
 def test_requested_amount_accepts_valid_formats(client, drafter, raw, saved):
-    r = client.post("/application/step/financial", data={"requested_amount_ksh": raw})
+    r = client.post("/application/step/financial", data={**FINANCIAL_OK, "requested_amount_ksh": raw})
     assert r.headers["Location"].endswith("/application/step/preferences")
     assert get_application(drafter["student_id"])["requested_amount_ksh"] == saved
 
@@ -328,41 +476,40 @@ def test_requested_amount_accepts_valid_formats(client, drafter, raw, saved):
 @pytest.mark.parametrize("raw", ["", "0", "-5000", "75000.50", "12.5", "abc", "seventy thousand", "KSh"])
 def test_requested_amount_rejects_invalid_values(client, drafter, raw):
     execute("UPDATE funding_applications SET requested_amount_ksh = 60000 WHERE id = ?", (drafter["application_id"],))
-    r = client.post("/application/step/financial", data={"requested_amount_ksh": raw,
-                                                         "household_situation": "should not be saved"})
+    r = client.post("/application/step/financial", data={**FINANCIAL_OK, "requested_amount_ksh": raw})
     assert r.headers["Location"].endswith("/application/step/financial")
-    app_row = get_application(drafter["student_id"])
-    assert app_row["requested_amount_ksh"] == 60000                 # unchanged
-    assert app_row["household_situation"] != "should not be saved"
+    assert get_application(drafter["student_id"])["requested_amount_ksh"] == 60000    # never overwritten
 
 
 # =====================================================================
-# 5. STEP 6 - PERSONAL STATEMENT
+# STEP 6 - PERSONAL STATEMENT (optional)
 # =====================================================================
-EXAMPLE_STATEMENT_START = "My goal is to complete my degree in Information Technology"
+EXAMPLE_STATEMENT_START = "I am currently pursuing a Bachelor's degree in Information Technology"
 
 
-def test_statement_step_shows_example_placeholder_and_tip(client, drafter):
+def test_statement_step_is_optional_and_shows_the_example(client, drafter):
     assert app_module.APPLICATION_STEPS.index("statement") == 5
     page = html(client, "/application/step/statement")
-    assert "Step 6 — Personal Statement<" in page
+    assert "Step 6 — Personal Statement" in page and "Optional" in page
     assert ("Tell us about your educational goals, financial need, career goals, and why funding matters "
             "to you and your community.") in page
     assert EXAMPLE_STATEMENT_START in page
-    assert ('placeholder="e.g. My educational goal is to... My financial need is... My career goal is... '
-            'Funding would help me..."') in page
-    assert ("Tip: Explain your education goal, financial need, career goal, and how your education could "
-            "benefit your community.") in page
-    # The example sits before the text box and is never inside it.
+    assert "create opportunities for other young people in my community." in page
+    assert 'placeholder="e.g. My educational goal is to...' in page
+    tag = page.split('name="personal_statement"', 1)[1].split(">", 1)[0]
+    assert "required" not in tag
     assert page.index(EXAMPLE_STATEMENT_START) < page.index('name="personal_statement"')
 
 
-def test_statement_saves_persists_and_example_is_never_saved(client, drafter):
-    client.post("/application/step/statement", data={"personal_statement": ""})
-    assert not get_application(drafter["student_id"])["personal_statement"]
+def test_personal_statement_can_be_blank_and_example_is_never_saved(client, drafter):
+    r = client.post("/application/step/statement", data={"personal_statement": ""})
+    assert r.headers["Location"].endswith("/application/step/documents")
+    assert get_application(drafter["student_id"])["personal_statement"] is None
     textarea = client.get("/application/step/statement").get_data(as_text=True).split('name="personal_statement"')[1]
-    assert EXAMPLE_STATEMENT_START not in textarea.split("</textarea>")[0]
+    assert "I am currently pursuing" not in textarea.split("</textarea>")[0]
 
+
+def test_personal_statement_saves_and_persists(client, drafter):
     mine = "Fictional: I study nursing and want to serve rural clinics in my county."
     r = client.post("/application/step/statement", data={"personal_statement": mine})
     assert r.headers["Location"].endswith("/application/step/documents")
@@ -375,7 +522,8 @@ def test_statement_saves_persists_and_example_is_never_saved(client, drafter):
 # 8. BANK / DISBURSEMENT
 # =====================================================================
 def to_bank(client):
-    return client.post("/application/step/documents", data={})
+    app_id = q("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1")[0][0]
+    return post_documents(client, required_uploads(app_id))
 
 
 @pytest.mark.parametrize("field", ["manual_bank_name", "account_holder_name", "account_number", "branch", "bank_code"])
@@ -558,16 +706,55 @@ def test_payment_stays_locked_without_a_required_visa_document(client, student, 
     assert r.status_code == 302 and f"/student-visa/application/{req}" in r.headers["Location"]
 
 
-def test_purpose_of_travel_is_still_required_before_payment(client, student):
+def test_purpose_of_travel_is_optional_with_examples(client, student):
     req = visa_request_for(client, student)
     page = html(client, f"/student-visa/application/{req}/step/visa_info")
-    assert 'placeholder="e.g. Educational purpose"' in page
-    client.post(f"/student-visa/application/{req}/step/visa_info",
-                data={**VISA_FORM_ANSWERS["visa_info"], "purpose_of_travel": ""})
+    assert 'placeholder="Example: Educational purposes"' in page
+    assert "Purpose of Travel (optional)" in page
+    tag = page.split('name="purpose_of_travel"', 1)[1].split(">", 1)[0]
+    assert "required" not in tag
+    for example in ("Educational purposes", "Study", "University/College education", "Attending an academic program",
+                    "Research", "Training", "Other"):
+        assert f'data-value="{example}"' in page, example
+    # Country and Visa Type stay required.
+    for name in ("destination_country", "visa_category"):
+        assert "required" in page.split(f'name="{name}"', 1)[1].split(">", 1)[0], name
+    assert "purpose_of_travel" not in app_module.visa_lib.VISA_REQUIRED_FIELDS["visa_info"]
+
+
+def test_purpose_of_travel_can_be_blank_and_payment_stays_available(client, student):
+    req = visa_request_for(client, student)
+    r = client.post(f"/student-visa/application/{req}/step/visa_info",
+                    data={**VISA_FORM_ANSWERS["visa_info"], "purpose_of_travel": ""})
+    assert r.headers["Location"].endswith(f"/student-visa/application/{req}/step/education")   # advanced
+    assert not q("SELECT purpose_of_travel FROM visa_requests WHERE id = ?", (req,))[0][0]
+    assert client.get(f"/student-visa/payment/{req}").status_code == 200
+
+
+@pytest.mark.parametrize("field", ["destination_country", "visa_category"])
+def test_country_and_visa_type_are_still_required(client, student, field):
+    req = visa_request_for(client, student)
+    client.post(f"/student-visa/application/{req}/step/visa_info", data={**VISA_FORM_ANSWERS["visa_info"], field: ""})
     r = client.get(f"/student-visa/payment/{req}")
     assert r.status_code == 302 and f"/student-visa/application/{req}" in r.headers["Location"]
-    client.post(f"/student-visa/application/{req}/step/visa_info", data=VISA_FORM_ANSWERS["visa_info"])
-    assert client.get(f"/student-visa/payment/{req}").status_code == 200
+
+
+def test_accommodation_details_are_optional_with_examples(client, student):
+    req = visa_request_for(client, student)
+    page = html(client, f"/student-visa/application/{req}/step/accommodation")
+    for name, example in (("accommodation_name", "Example: University of Embu Hostels / ABC Hotel / John Doe"),
+                          ("accommodation_address", "Example: Embu, Kenya"),
+                          ("accommodation_contact", "Example: +254 7XX XXX XXX / host@example.com")):
+        tag = page.split(f'name="{name}"', 1)[1].split(">", 1)[0]
+        assert "required" not in tag and f'placeholder="{example}"' in tag, name
+    r = client.post(f"/student-visa/application/{req}/step/accommodation",
+                    data={"accommodation_type": "Hotel", "accommodation_name": "", "accommodation_address": "",
+                          "accommodation_contact": ""})
+    assert r.headers["Location"].endswith(f"/student-visa/application/{req}/step/travel_history")
+    row = q("SELECT accommodation_name, accommodation_address, accommodation_contact FROM visa_requests WHERE id = ?",
+            (req,))[0]
+    assert not any(row)
+    assert client.get(f"/student-visa/payment/{req}").status_code == 200       # nothing blocks payment
 
 
 def test_optional_visa_yes_without_upload_blocks_payment_but_keeps_other_answers(client, student):
@@ -636,14 +823,15 @@ def test_documents_page_cannot_mark_a_funding_document_uploaded(client, drafter)
 
 
 def test_documents_page_has_no_demo_upload_button_and_links_to_real_upload(client, drafter):
-    cv = docs(drafter["application_id"])["CV"]
-    client.post("/application/step/documents", data={doc_field(cv, "availability"): "yes"})   # Yes, no file
+    letter = docs(drafter["application_id"])["Admission Letter"]
+    client.post("/application/step/documents", data={doc_field(letter, "availability"): "yes"})   # Yes, no file
     page = html(client, "/documents")
     assert 'method="POST"' not in page and 'name="document_id"' not in page
     assert ">Upload<" not in page
-    assert "CV — you selected Yes, so please upload the document." in page
+    assert "Admission Letter — you selected Yes, so please upload the document." in page
+    assert "CV — Required: please upload this document." in page
     assert 'href="/application/step/documents"' in page
-    assert docs(drafter["application_id"])["CV"]["status"] == "Missing"
+    assert docs(drafter["application_id"])["Admission Letter"]["status"] == "Missing"
 
 
 def test_visa_documents_page_cannot_mark_a_visa_document_uploaded(client, student):
@@ -699,3 +887,99 @@ def test_previously_faked_visa_rows_are_reset_but_real_uploads_are_kept(client, 
     assert after["Travel Medical Insurance"]["file_path"] is None
     assert after["Passport-size Photograph"] == photo
     assert client.get(f"/student-visa/documents/file/{photo['id']}").status_code == 200
+
+
+# =====================================================================
+# REVIEW - required vs optional, blanks are not errors, server-side checks
+# =====================================================================
+def _ready_for_review(client, drafter):
+    to_bank(client)
+    complete_bank_step(client)
+
+
+def test_review_lists_every_document_with_requirement_and_status(client, drafter):
+    _ready_for_review(client, drafter)
+    page = html(client, "/application/step/review")
+    table = page.split('id="reviewDocuments"', 1)[1].split("</table>", 1)[0]
+    for name in FUNDING_DOCUMENTS:
+        row = table.split(f"<td>{name}</td>", 1)[1].split("</tr>", 1)[0]
+        if name in REQUIRED_DOCUMENTS:
+            assert ">Required<" in row and ">Uploaded<" in row, name
+        else:
+            assert ">Optional<" in row and "Missing" in row and "⚠" not in row, name   # never an error
+    assert "A missing optional document does not stop your application." in page
+
+
+def test_review_shows_blank_optional_fields_as_optional_not_errors(client, drafter):
+    client.post("/application/step/statement", data={"personal_statement": ""})
+    client.post("/application/step/financial", data={**FINANCIAL_OK, "funding_already_received": "",
+                                                     "household_situation": ""})
+    _ready_for_review(client, drafter)
+    page = html(client, "/application/step/review")
+    summary = page.split('id="reviewSummary"', 1)[1].split("</table>", 1)[0]
+    assert "⚠" not in summary
+    assert summary.count("Not provided (optional)") >= 4      # academic info, household, funding received, statement
+    r = client.post("/application/step/review", data={})
+    assert r.headers["Location"].endswith("/application/step/visa")
+
+
+def test_review_shows_funding_need_selections(client, drafter):
+    client.post("/application/step/funding_need", data={**NEEDS, "other_expenses_need": "Partial",
+                                                        "other_expenses": "Internet/data"})
+    _ready_for_review(client, drafter)
+    page = html(client, "/application/step/review")
+    assert 'id="reviewNeed_tuition_need">Full<' in page
+    assert 'id="reviewNeed_other_expenses_need">Partial — Internet/data<' in page
+
+
+@pytest.mark.parametrize("setup_sql,step", [
+    ("UPDATE funding_applications SET graduation_year = NULL WHERE id = ?", "education"),
+    ("UPDATE funding_applications SET estimated_financial_need = '' WHERE id = ?", "financial"),
+    ("UPDATE documents SET status = 'Missing', file_path = NULL WHERE application_id = ? AND document_type = 'CV'",
+     "documents"),
+])
+def test_review_enforces_required_fields_and_documents_server_side(client, drafter, setup_sql, step):
+    _ready_for_review(client, drafter)
+    execute(setup_sql, (drafter["application_id"],))
+    r = client.post("/application/step/review", data={})
+    assert r.headers["Location"].endswith(f"/application/step/{step}")
+
+
+def test_review_passes_with_all_optional_documents_missing(client, drafter):
+    _ready_for_review(client, drafter)
+    assert all(d["status"] == "Missing" for n, d in docs(drafter["application_id"]).items() if n in OPTIONAL_DOCUMENTS)
+    r = client.post("/application/step/review", data={})
+    assert r.headers["Location"].endswith("/application/step/visa")
+
+
+def test_final_submission_rechecks_required_documents(client, student):
+    application = get_application(student["student_id"])
+    execute("UPDATE funding_applications SET visa_status = 'NEEDS_ASSISTANCE', visa_step_status = 'COMPLETE' "
+            "WHERE id = ?", (application["id"],))
+    execute("UPDATE documents SET status = 'Missing', file_path = NULL WHERE application_id = ? "
+            "AND document_type = 'Recommendation Letter'", (application["id"],))
+    r = client.post("/application/submit")
+    assert r.headers["Location"].endswith("/application/step/documents")
+    assert get_application(student["student_id"])["status"] == "Draft"
+    # Optional documents missing never block submission.
+    execute("UPDATE documents SET status = 'Uploaded', file_path = 'funding_documents/x.pdf' "
+            "WHERE application_id = ? AND document_type = 'Recommendation Letter'", (application["id"],))
+    r = client.post("/application/submit")
+    assert "/application/confirmation/" in r.headers["Location"]
+
+
+def test_admin_application_detail_labels_required_and_optional(client, student):
+    application = get_application(student["student_id"])
+    admin = app_module.app.test_client()
+    db = get_db()
+    uid = db.execute("INSERT INTO users (email, password_hash, role) VALUES (?, 'x', 'admin')",
+                     (f"admin-{uuid.uuid4().hex[:8]}@example.org",)).lastrowid
+    db.execute("INSERT INTO admins (user_id, full_name) VALUES (?, 'Example Admin')", (uid,))
+    db.commit()
+    db.close()
+    with admin.session_transaction() as s:
+        s["role"], s["user_id"] = "admin", uid
+    page = html(admin, f"/admin/applications/{application['id']}")
+    for name in FUNDING_DOCUMENTS:
+        item = page.split(f"<span>{name}", 1)[1].split("</span></span>", 1)[0]
+        assert ("Required" if name in REQUIRED_DOCUMENTS else "Optional") in item, name

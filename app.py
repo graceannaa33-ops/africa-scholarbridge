@@ -25,7 +25,7 @@ from flask import (
 )
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from database import get_db, init_db, DB_PATH
+from database import get_db, init_db, DB_PATH, REQUIRED_FUNDING_DOCUMENTS
 from matching import run_matching_for_application
 import visa as visa_lib
 import banks_lib
@@ -386,16 +386,35 @@ DEMO_MODE = False  # Legacy demo payment is permanently disabled for manual veri
 
 # Document checklist used for every application (kept simple / hard-coded
 # for a beginner project - could later move into its own database table).
-DOCUMENT_CHECKLIST = [
-    ("Academic Transcripts", False),
-    ("Certificates", False),
-    ("Admission Letter", False),
-    ("Recommendation Letter", False),
-    ("Personal Statement", False),
-    ("CV", False),
-    ("Passport / Identity Document", False),
-    ("Proof of Financial Need", False),
-    ("Provider-Specific Document", False),
+# (document_type, is_required). Required documents must be uploaded on the
+# Documents step; optional ones are answered Yes / No / left blank, and only
+# an explicit Yes needs an upload. The required set comes from
+# database.REQUIRED_FUNDING_DOCUMENTS so the startup migration always agrees.
+_FUNDING_DOCUMENT_ORDER = [
+    "Academic Transcripts", "Certificates", "Admission Letter", "Recommendation Letter",
+    "Personal Statement", "CV", "Passport / Identity Document", "Proof of Financial Need",
+    "Provider-Specific Document",
+]
+DOCUMENT_CHECKLIST = [(name, name in REQUIRED_FUNDING_DOCUMENTS) for name in _FUNDING_DOCUMENT_ORDER]
+
+# Step 2 - Education: required fields (Additional Academic Information is optional).
+EDUCATION_LEVELS = ["Undergraduate", "Master's", "PhD", "Vocational/Technical", "High School"]
+EDUCATION_REQUIRED_FIELDS = [
+    ("institution", "Institution"), ("education_level", "Education Level"), ("course", "Course"),
+    ("field_of_study", "Field of Study"), ("year_of_study", "Year of Study"),
+    ("graduation_year", "Expected Graduation Year"),
+]
+# Step 3 - Funding Need: one level per category.
+FUNDING_NEED_LEVELS = ["Not Needed", "Partial", "Full"]
+FUNDING_NEED_CATEGORIES = [
+    ("tuition_need", "Tuition"), ("accommodation_need", "Accommodation"),
+    ("living_expenses_need", "Living Expenses"), ("books_need", "Books"), ("transport_need", "Transport"),
+    ("technology_need", "Technology"), ("other_expenses_need", "Other Education Expenses"),
+]
+# Step 4 - Financial Information: Source of Support choices ("Other" can be specified).
+SOURCE_OF_SUPPORT_OPTIONS = [
+    "Parents/Guardians", "Self-funded", "Family Members", "Scholarship", "HELB/HEF",
+    "Part-time Employment", "Sponsor/Organization", "Other",
 ]
 
 APPLICATION_STATUSES = [
@@ -612,11 +631,11 @@ def send_application_confirmation_email(db, application_id, force=False):
 
 
 def _ensure_funding_document_checklist(db, application_id):
-    """Ensure every current funding checklist item exists and is optional.
+    """Ensure every current funding checklist item exists with the current
+    Required / Optional flag (DOCUMENT_CHECKLIST).
 
-    Existing applications may have been created under the older policy where
-    some documents were required. Their checklist rows are migrated to the
-    current all-optional policy without deleting uploaded files or answers.
+    Rows created under an earlier policy are corrected in place without
+    deleting uploaded files or the student's Yes/No/blank answers.
     """
     have = {r["document_type"] for r in db.execute(
         "SELECT document_type FROM documents WHERE application_id = ?", (application_id,))}
@@ -624,30 +643,37 @@ def _ensure_funding_document_checklist(db, application_id):
         if doc_type not in have:
             db.execute(
                 "INSERT INTO documents (application_id, document_type, is_required, availability) VALUES (?, ?, ?, ?)",
-                (application_id, doc_type, 0, None),
+                (application_id, doc_type, 1 if required else 0, None),
             )
-    db.execute(
-        """UPDATE documents
-           SET is_required = 0
-           WHERE application_id = ?
-             AND document_type IN ({})""".format(",".join("?" * len(DOCUMENT_CHECKLIST))),
-        (application_id, *[doc_type for doc_type, _ in DOCUMENT_CHECKLIST]),
-    )
+        else:
+            db.execute(
+                "UPDATE documents SET is_required = ? WHERE application_id = ? AND document_type = ? AND is_required != ?",
+                (1 if required else 0, application_id, doc_type, 1 if required else 0),
+            )
 
 
 def _funding_yes_without_upload_message(document_type):
     return f"{document_type} — you selected Yes, so please upload the document."
 
 
-def _missing_funding_documents(documents):
-    """Only a document explicitly marked Yes needs an upload.
+def _funding_required_missing_message(document_type):
+    return f"{document_type} — Required: please upload this document."
 
-    All funding documents are optional, so leaving an item unanswered (NULL)
-    or answering No never blocks the application from continuing.
+
+def _missing_funding_documents(documents):
+    """Documents that block continuing from the Documents step.
+
+    - A REQUIRED document must be uploaded.
+    - An OPTIONAL document blocks only when the student explicitly chose
+      Yes and has not uploaded it. Optional + blank (NULL) or No never blocks.
     """
     missing = []
     for d in documents:
-        if (d["availability"] or "").lower() == "yes" and d["status"] == "Missing":
+        if d["status"] != "Missing":
+            continue
+        if d["is_required"]:
+            missing.append(_funding_required_missing_message(d["document_type"]))
+        elif (d["availability"] or "").lower() == "yes":
             missing.append(_funding_yes_without_upload_message(d["document_type"]))
     return missing
 
@@ -675,7 +701,7 @@ def get_or_create_draft_application(db, student, cycle):
               "institution", "education_level", "course", "field_of_study", "year_of_study",
               "academic_info", "graduation_year", "funding_type_needed", "tuition_need",
               "accommodation_need", "living_expenses_need", "books_need", "transport_need",
-              "technology_need", "other_expenses", "household_situation", "source_of_support",
+              "technology_need", "other_expenses_need", "other_expenses", "household_situation", "source_of_support",
               "estimated_financial_need", "funding_already_received", "preferences",
               "personal_statement"]
 
@@ -704,12 +730,12 @@ def get_or_create_draft_application(db, student, cycle):
     db.commit()
     app_id = cur.lastrowid
 
-    # Create the document checklist for this application. All funding
-    # documents are optional under the current policy.
+    # Create the document checklist for this application (required flags
+    # from DOCUMENT_CHECKLIST).
     for doc_type, required in DOCUMENT_CHECKLIST:
         db.execute(
             "INSERT INTO documents (application_id, document_type, is_required, availability) VALUES (?, ?, ?, ?)",
-            (app_id, doc_type, 0, None),
+            (app_id, doc_type, 1 if required else 0, None),
         )
     db.commit()
 
@@ -1502,6 +1528,74 @@ def _redirect_to_fix_bank_step(db, application, message):
     return redirect(url_for("application_step", step_name="bank"))
 
 
+def _blank(value):
+    return not (value or "").strip() if isinstance(value, str) or value is None else False
+
+
+def _education_missing(values):
+    """Labels of required Education fields that are empty/invalid."""
+    missing = []
+    for field, label in EDUCATION_REQUIRED_FIELDS:
+        value = (values[field] or "").strip() if values[field] is not None else ""
+        if not value or (field == "education_level" and value not in EDUCATION_LEVELS):
+            missing.append(label)
+    return missing
+
+
+OTHER_EXPENSES_SPECIFY_MESSAGE = ("Other Education Expenses — you selected Partial or Full, so please specify "
+                                  "the expense (e.g. examination fees, research costs, internet/data).")
+ESTIMATED_NEED_MESSAGE = "Estimated Financial Need is required. Example: KSh 150,000 per academic year."
+
+
+def _application_blockers(db, application):
+    """First thing (in flow order) still stopping this draft from passing
+    Review / being submitted, as (step_name, message) - or None.
+
+    This is the single server-side definition of the application's required
+    fields, so Review and final submission can never disagree with the
+    individual steps. Optional fields (Additional Academic Information,
+    household situation, source of support, funding already received,
+    personal statement, optional documents) never appear here."""
+    missing = [label for f, label in (("full_name", "full name"), ("email", "email"), ("country", "country"))
+               if _blank(application[f])]
+    if missing:
+        return "personal", "Please complete your " + ", ".join(missing) + " before continuing."
+    missing = _education_missing(application)
+    if missing:
+        return "education", "Please complete the required Education fields: " + ", ".join(missing) + "."
+    if application["other_expenses_need"] in ("Partial", "Full") and _blank(application["other_expenses"]):
+        return "funding_need", OTHER_EXPENSES_SPECIFY_MESSAGE
+    if not application["requested_amount_ksh"]:
+        return "financial", REQUESTED_AMOUNT_MESSAGE
+    if _blank(application["estimated_financial_need"]):
+        return "financial", ESTIMATED_NEED_MESSAGE
+    _ensure_funding_document_checklist(db, application["id"])
+    documents = db.execute("SELECT * FROM documents WHERE application_id = ? ORDER BY id",
+                           (application["id"],)).fetchall()
+    missing_docs = _missing_funding_documents(documents)
+    if missing_docs:
+        return "documents", " ".join(missing_docs)
+    return None
+
+
+def _source_of_support_parts(value):
+    """Stored Source of Support -> (set of chosen options, 'Other' text).
+    Anything that is not one of the listed options (including free text saved
+    before the options existed) is shown in the 'Other' box, so nothing a
+    student typed earlier is lost when they edit the step."""
+    chosen, other = set(), []
+    for item in [p.strip() for p in (value or "").split(", ") if p.strip()]:
+        if item in SOURCE_OF_SUPPORT_OPTIONS:
+            chosen.add(item)
+        elif item.startswith("Other: "):
+            chosen.add("Other")
+            other.append(item[len("Other: "):])
+        else:
+            chosen.add("Other")
+            other.append(item)
+    return chosen, ", ".join(other)
+
+
 def _review_done(application):
     """True once the student has submitted the Review step (current_step
     then points at the final Visa Verification step or beyond)."""
@@ -1849,38 +1943,68 @@ def application_step(step_name):
     if request.method == "POST":
         form = request.form
         updates = {}
+        # Validation problems for THIS step. What the student entered is
+        # still saved, then they stay on the step - nothing typed is lost.
+        step_problems = []
+
+        def clean(field):
+            # Optional blanks are stored as NULL; examples/placeholders are
+            # never submitted as values, so nothing is ever pre-filled.
+            return (form.get(field) or "").strip() or None
 
         if step_name == "personal":
             for f in ["full_name", "date_of_birth", "country", "citizenship", "phone", "email", "gender"]:
                 updates[f] = form.get(f)
         elif step_name == "education":
-            for f in ["institution", "education_level", "course", "field_of_study", "year_of_study",
-                      "academic_info", "graduation_year"]:
-                updates[f] = form.get(f)
+            for f in ["institution", "course", "field_of_study", "year_of_study", "graduation_year"]:
+                updates[f] = clean(f)
+            level = clean("education_level")
+            updates["education_level"] = level if level in EDUCATION_LEVELS else None
+            updates["academic_info"] = clean("academic_info")          # optional
+            missing = _education_missing(updates)
+            if missing:
+                step_problems.append("Please complete the required Education fields: " + ", ".join(missing) + ".")
         elif step_name == "funding_need":
-            for f in ["funding_type_needed", "tuition_need", "accommodation_need", "living_expenses_need",
-                      "books_need", "transport_need", "technology_need", "other_expenses"]:
-                updates[f] = form.get(f)
+            updates["funding_type_needed"] = form.get("funding_type_needed")
+            for f, _label in FUNDING_NEED_CATEGORIES:
+                value = clean(f)
+                # Only Not Needed / Partial / Full are stored; anything else is "not answered".
+                updates[f] = value if value in FUNDING_NEED_LEVELS else None
+            updates["other_expenses"] = clean("other_expenses")
+            # Specifying the expense is needed only when it is actually needed.
+            if updates["other_expenses_need"] in ("Partial", "Full") and not updates["other_expenses"]:
+                step_problems.append(OTHER_EXPENSES_SPECIFY_MESSAGE)
         elif step_name == "financial":
             requested = parse_requested_amount_ksh(form.get("requested_amount_ksh"))
             if requested is None:
-                flash(REQUESTED_AMOUNT_MESSAGE, "danger")
-                return redirect(url_for("application_step", step_name="financial"))
-            updates["requested_amount_ksh"] = requested
-            for f in ["household_situation", "source_of_support", "estimated_financial_need",
-                      "funding_already_received"]:
-                updates[f] = form.get(f)
+                # An invalid amount never overwrites the saved one.
+                step_problems.append(REQUESTED_AMOUNT_MESSAGE)
+            else:
+                updates["requested_amount_ksh"] = requested
+            updates["estimated_financial_need"] = clean("estimated_financial_need")   # REQUIRED
+            if not updates["estimated_financial_need"]:
+                step_problems.append(ESTIMATED_NEED_MESSAGE)
+            updates["household_situation"] = clean("household_situation")             # optional
+            updates["funding_already_received"] = clean("funding_already_received")   # optional
+            sources = [v for v in form.getlist("source_of_support") if v in SOURCE_OF_SUPPORT_OPTIONS]
+            other_text = " ".join((form.get("source_of_support_other") or "").split())
+            if other_text and "Other" not in sources:
+                sources.append("Other")
+            parts = [f"Other: {other_text}" if (src == "Other" and other_text) else src
+                     for src in SOURCE_OF_SUPPORT_OPTIONS if src in sources]
+            updates["source_of_support"] = ", ".join(parts) or None                    # optional
         elif step_name == "preferences":
             updates["preferences"] = ", ".join(form.getlist("preferences"))
         elif step_name == "statement":
-            updates["personal_statement"] = form.get("personal_statement")
+            updates["personal_statement"] = clean("personal_statement")               # optional
         elif step_name == "documents":
             _ensure_funding_document_checklist(db, application["id"])
             document_rows = db.execute(
                 "SELECT * FROM documents WHERE application_id = ? ORDER BY id",
                 (application["id"],),
             ).fetchall()
-            # Every funding document is optional:
+            # REQUIRED documents (DOCUMENT_CHECKLIST) must be uploaded.
+            # OPTIONAL documents:
             #   blank -> NULL (allowed), No -> 'No' (allowed),
             #   Yes + file -> 'Yes' + Uploaded (allowed), Yes without a file -> blocked.
             # Every answer and every valid upload in this submission is saved
@@ -1888,7 +2012,10 @@ def application_step(step_name):
             # student's other answers; only then is continuation blocked.
             problems = []
             for row in document_rows:
-                answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
+                if row["is_required"]:
+                    answer = "yes"          # no Yes/No choice: a required document must be uploaded
+                else:
+                    answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
                 if answer not in ("yes", "no"):
                     # Blank is a deliberate third state. Keep it NULL rather
                     # than silently turning an unanswered item into "No".
@@ -1916,7 +2043,8 @@ def application_step(step_name):
                         (f"funding_documents/{stored}", row["id"]),
                     )
                 elif row["status"] == "Missing":
-                    problems.append((_funding_yes_without_upload_message(row["document_type"]), "warning"))
+                    problems.append(((_funding_required_missing_message if row["is_required"]
+                                      else _funding_yes_without_upload_message)(row["document_type"]), "warning"))
             db.commit()
             if problems:
                 for message, category in problems:
@@ -1924,19 +2052,15 @@ def application_step(step_name):
                 return redirect(url_for("application_step", step_name="documents"))
         elif step_name == "review":
             # Review leads to the FINAL step (Visa Verification), so make
-            # sure the earlier steps that must be filled actually are.
-            missing = [label for f, label in (("full_name", "full name"), ("email", "email"),
-                                               ("country", "country"))
-                       if not (application[f] or "").strip()]
-            if missing:
-                flash("Please complete your " + ", ".join(missing) + " before continuing.", "warning")
-                return redirect(url_for("application_step", step_name="personal"))
+            # sure every REQUIRED field and document is actually there.
+            blocker = _application_blockers(db, application)
+            if blocker:
+                db.commit()
+                flash(blocker[1], "warning")
+                return redirect(url_for("application_step", step_name=blocker[0]))
             bank_problem = _bank_step_blocker(db, application)
             if bank_problem:
                 return _redirect_to_fix_bank_step(db, application, bank_problem)
-            if not application["requested_amount_ksh"]:
-                flash(REQUESTED_AMOUNT_MESSAGE, "warning")
-                return redirect(url_for("application_step", step_name="financial"))
 
         if updates:
             set_clause = ", ".join([f"{k} = ?" for k in updates])
@@ -1944,6 +2068,11 @@ def application_step(step_name):
                 f"UPDATE funding_applications SET {set_clause}, last_updated = CURRENT_TIMESTAMP WHERE id = ?",
                 (*updates.values(), application["id"]),
             )
+        if step_problems:
+            db.commit()
+            for message in step_problems:
+                flash(message, "danger")
+            return redirect(url_for("application_step", step_name=step_name))
 
         next_step = min(step_index + 1, len(APPLICATION_STEPS) - 1)
         db.execute("UPDATE funding_applications SET current_step = ? WHERE id = ?",
@@ -1971,6 +2100,9 @@ def application_step(step_name):
         steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES, documents=documents,
         missing_documents=_missing_funding_documents(documents),
         review_bank=review_bank, review_masked_account=review_masked_account,
+        education_levels=EDUCATION_LEVELS, funding_need_levels=FUNDING_NEED_LEVELS,
+        funding_need_categories=FUNDING_NEED_CATEGORIES, support_options=SOURCE_OF_SUPPORT_OPTIONS,
+        support_parts=_source_of_support_parts(application["source_of_support"]),
     )
 
 
@@ -2195,8 +2327,13 @@ def application_submit():
     if not _visa_requirement_passed(application):
         flash(VISA_STEP_REQUIRED_MESSAGE, "warning")
         return redirect(url_for("application_step", step_name="visa"))
-    # Bank details may have been edited/un-confirmed after Review - the
-    # application cannot be completed until they are complete again.
+    # Every required field/document (and the bank details, which may have
+    # been edited after Review) must still be complete at submission.
+    blocker = _application_blockers(db, application)
+    if blocker:
+        db.commit()
+        flash(blocker[1], "warning")
+        return redirect(url_for("application_step", step_name=blocker[0]))
     bank_problem = _bank_step_blocker(db, application)
     if bank_problem:
         return _redirect_to_fix_bank_step(db, application, bank_problem)

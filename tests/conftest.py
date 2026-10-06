@@ -103,23 +103,39 @@ def complete_steps_before_visa(client):
         "estimated_financial_need": "USD 3,000 / year", "funding_already_received": ""})
     client.post("/application/step/preferences", data={"preferences": ["International Study", "Scholarship"]})
     client.post("/application/step/statement", data={"personal_statement": "I want to study computer science."})
-    # Every funding document is optional: the helper answers No for each one
-    # and reaches Bank/Review through the real document step. (The upload
-    # branch below only applies to a legacy required row, which the startup
-    # migration no longer leaves behind.)
+    # Required funding documents are uploaded (fictional PDF bytes) through
+    # the real Documents step; optional documents are explicitly marked No.
     db = get_db()
     app_row = db.execute("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1").fetchone()
-    rows = db.execute("SELECT id, is_required FROM documents WHERE application_id = ?", (app_row["id"],)).fetchall()
     db.close()
-    payload = {f"document_{row['id']}_availability": "no" for row in rows if not row["is_required"]}
-    for row in rows:
-        if row["is_required"]:
-            payload[f"document_{row['id']}_file"] = (io.BytesIO(b"%PDF-1.4\n% test document\n"), f"test-{row['id']}.pdf")
-    client.post("/application/step/documents", data=payload, content_type="multipart/form-data")
+    client.post("/application/step/documents", data=funding_documents_payload(app_row["id"]),
+                content_type="multipart/form-data")
     complete_bank_step(client)
     r = client.post("/application/step/review", data={})
     assert r.status_code == 302 and r.headers["Location"].endswith("/application/step/visa"), r.headers.get("Location")
     return r
+
+
+FICTIONAL_PDF = b"%PDF-1.4\n% fictional test document\n"
+COMPLETE_EDUCATION = {"institution": "Example University", "education_level": "Undergraduate",
+                      "course": "Bachelor of Information Technology", "field_of_study": "Information Technology",
+                      "year_of_study": "2nd Year", "graduation_year": "2028", "academic_info": ""}
+
+
+def funding_documents_payload(application_id, optional="no"):
+    """Form data for the Documents step: a fictional PDF for every REQUIRED
+    funding document, and `optional` ('no', 'yes' or None = leave blank)
+    for every optional one."""
+    db = get_db()
+    rows = db.execute("SELECT id, is_required FROM documents WHERE application_id = ?", (application_id,)).fetchall()
+    db.close()
+    payload = {}
+    for row in rows:
+        if row["is_required"]:
+            payload[f"document_{row['id']}_file"] = (io.BytesIO(FICTIONAL_PDF), f"required-{row['id']}.pdf")
+        elif optional:
+            payload[f"document_{row['id']}_availability"] = optional
+    return payload
 
 
 def get_application(student_id):

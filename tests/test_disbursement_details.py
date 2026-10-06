@@ -11,7 +11,8 @@ import uuid
 import pytest
 
 import app as app_module
-from conftest import TEST_BANK_DETAILS, complete_bank_step, get_application
+from conftest import (COMPLETE_EDUCATION, TEST_BANK_DETAILS, complete_bank_step, funding_documents_payload,
+                      get_application)
 from database import get_db
 
 
@@ -50,9 +51,7 @@ def applicant(client):
     client.get("/application/start")
     client.post("/application/step/personal", data={"full_name": "Alex Testperson", "date_of_birth": "2000-01-01",
                                                     "country": "Kenya", "phone": "+254 700 000 001", "email": email})
-    client.post("/application/step/education", data={"institution": "Example University",
-                                                     "education_level": "Undergraduate",
-                                                     "course": "Bachelor of Information Technology"})
+    client.post("/application/step/education", data=COMPLETE_EDUCATION)
     client.post("/application/step/funding_need", data={"funding_type_needed": "Full tuition"})
     sid = q("SELECT s.id FROM students s JOIN users u ON u.id = s.user_id WHERE u.email = ?", (email,))[0][0]
     return {"email": email, "student_id": sid}
@@ -61,13 +60,18 @@ def applicant(client):
 def financial(client, amount):
     return client.post("/application/step/financial", data={"requested_amount_ksh": amount,
                                                             "household_situation": "", "source_of_support": "",
-                                                            "estimated_financial_need": "", "funding_already_received": ""})
+                                                            "estimated_financial_need": "KSh 150,000 per academic year",
+                                                            "funding_already_received": ""})
 
 
 def to_bank_step(client):
     for step, data in (("preferences", {"preferences": ["Scholarship"]}),
-                       ("statement", {"personal_statement": "Example statement."}), ("documents", {})):
+                       ("statement", {"personal_statement": "Example statement."})):
         client.post(f"/application/step/{step}", data=data)
+    app_id = q("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1")[0][0]
+    # Required documents uploaded; optional ones left unanswered (allowed).
+    client.post("/application/step/documents", data=funding_documents_payload(app_id, optional=None),
+                content_type="multipart/form-data")
 
 
 def bank_row(student_id):
