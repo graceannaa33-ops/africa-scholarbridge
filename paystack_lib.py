@@ -108,9 +108,17 @@ def valid_signature(raw_body, signature):
 
 
 def mask_phone(phone):
-    """'+254712345678' -> '+2547******78' (for logs)."""
-    phone = str(phone or "")
-    return phone[:5] + "*" * max(len(phone) - 7, 0) + phone[-2:] if len(phone) > 7 else "***"
+    """Display-safe phone number for LOGS - only the minimum needed to debug:
+    '0712345678' -> '07******78', '+254712345678' -> '+254*******78' (country
+    code and last two digits). Never returns the full number."""
+    raw = str(phone or "").strip()
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) <= 4:
+        return "***"
+    if raw.startswith("+"):
+        keep = digits[:3]                                  # country code, e.g. 254
+        return "+" + keep + "*" * (len(digits) - len(keep) - 2) + digits[-2:]
+    return digits[:2] + "*" * (len(digits) - 4) + digits[-2:]
 
 
 # Fields of Paystack's `data` object that are safe to keep and log: they
@@ -156,12 +164,23 @@ class PaystackError(Exception):
         return _mask_in_text(" ".join(parts))          # no full phone number, even inside messages
 
 
-_PHONE_LIKE = re.compile(r"(?<![\w\-+])\+?\d[\d ]{7,14}\d(?![\w\-])")   # standalone numbers only
+_PHONE_LIKE = re.compile(r"(?<![\w\-+])\+?\d[\d \-]{7,16}\d(?![\w\-])")   # standalone numbers only
 
 
 def _mask_in_text(value):
-    """Masks anything that looks like a phone number inside a logged string."""
-    return _PHONE_LIKE.sub(lambda m: mask_phone(re.sub(r"[^\d+]", "", m.group())), str(value))
+    """Masks anything that looks like a phone number (9-15 digits, spaces or
+    dashes allowed) inside a logged string. Shorter runs - dates such as
+    2026-10-06, amounts, ids - are left as they are for debugging."""
+    def mask(m):
+        text = m.group()
+        n_digits = sum(ch.isdigit() for ch in text)
+        return mask_phone(re.sub(r"[^\d+]", "", text)) if 9 <= n_digits <= 15 else text
+    return _PHONE_LIKE.sub(mask, str(value))
+
+
+def mask_in_text(value):
+    """Public: mask phone numbers inside any text before it is logged."""
+    return _mask_in_text(value)
 
 
 def log_http_error_diagnostics(err):

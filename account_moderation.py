@@ -16,7 +16,9 @@ Permanent deletion (delete_student_account) removes, in ONE transaction:
     e-mail address: contact-form messages and scam reports;
   * the student's "recently active" monitoring entry.
 It then VERIFIES nothing linked to the student remains (otherwise it rolls
-back), writes one audit row, and commits. SQLite's secure_delete is on for
+back), writes one DE-IDENTIFIED audit row (which admin, when, why, and how
+many records/files - never the student's e-mail, name or account ids), and
+commits. SQLite's secure_delete is on for
 every connection (database.get_db), so SQLite overwrites freed space with
 zeros instead of leaving old content in the file's free space; after the
 deletion the file is also compacted (VACUUM, best effort) so copies left by
@@ -29,8 +31,8 @@ infrastructure backups, snapshots, previously sent emails, or external
 systems, and it does not guarantee forensic destruction on the physical
 storage device (see docs/ACCOUNT_DELETION.md).
 
-Stored files (verified visa documents, M-PESA screenshots, visa assistance
-supporting documents) are deleted only
+Stored files (Step 7 funding documents, verified visa documents, M-PESA
+screenshots, visa assistance supporting documents) are deleted only
 AFTER the commit. If that fails, the database deletion stands, the failure
 is recorded in the audit row, and the admin is told.
 
@@ -178,6 +180,13 @@ def _stored_files(db, student_id):
             "SELECT d.stored_file FROM visa_documents d JOIN visa_requests v ON v.id = d.request_id "
             "WHERE v.student_id = ? AND d.stored_file IS NOT NULL", (student_id,)):
         files.append(("visa_application_documents", name))
+    # Step 7 funding documents: documents.file_path = "funding_documents/<random name>".
+    # Other values in that column (legacy "uploads/demo-..." placeholders) have no
+    # file behind them and are removed with their rows.
+    for (path,) in db.execute(
+            "SELECT d.file_path FROM documents d JOIN funding_applications a ON a.id = d.application_id "
+            "WHERE a.student_id = ? AND d.file_path LIKE 'funding_documents/%'", (student_id,)):
+        files.append(("funding_documents", path[len("funding_documents/"):]))
     return files
 
 
@@ -254,13 +263,7 @@ def delete_student_account(db, user_id, admin_user_id, admin_email, reason, uplo
             raise ModerationError(f"Related records were not fully removed: {sorted(left)}")
 
         details = {"removed": impact, "files": {"to_delete": len(files)}}
-        cur = db.execute(
-            """INSERT INTO admin_audit_log (admin_user_id, admin_email, action, target_user_id,
-                   target_student_id, target_label, reason, details)
-               VALUES (?, ?, 'delete_student_account', ?, ?, ?, ?, ?)""",
-            (admin_user_id, admin_email, user_id, student_id, mask_email(email), reason,
-             json.dumps(details)))
-        audit_id = cur.lastrowid
+        audit_id = _write_audit(db, admin_user_id, admin_email, reason, details)
         db.commit()
     except Exception:
         db.rollback()
@@ -275,11 +278,16 @@ def delete_student_account(db, user_id, admin_user_id, admin_email, reason, uplo
             continue
         try:
             os.remove(path)
-            removed += 1
         except FileNotFoundError:
             missing += 1
+            continue
         except OSError:
             failed += 1
+            continue
+        if os.path.exists(path):                           # verify it is really gone
+            failed += 1
+        else:
+            removed += 1
     details["files"].update(removed=removed, already_missing=missing, failed=failed)
     try:
         db.execute("UPDATE admin_audit_log SET details = ? WHERE id = ?", (json.dumps(details), audit_id))
@@ -297,6 +305,20 @@ def delete_student_account(db, user_id, admin_user_id, admin_email, reason, uplo
             "Account deletion for user %s succeeded; database compaction (VACUUM) was skipped "
             "because the database was busy. It runs again on the next deletion.", user_id)
     return "deleted", details
+
+
+def _write_audit(db, admin_user_id, admin_email, reason, details):
+    """One DE-IDENTIFIED audit row: which admin deleted a student account, when,
+    why (the reason is validated to contain no personal details) and how many
+    records/files were removed. It deliberately stores NOTHING that identifies
+    the deleted student - no e-mail (masked or not), name, or user/student id -
+    so no student-specific record survives the deletion."""
+    cur = db.execute(
+        """INSERT INTO admin_audit_log (admin_user_id, admin_email, action, target_user_id,
+               target_student_id, target_label, reason, details)
+           VALUES (?, ?, 'delete_student_account', NULL, NULL, NULL, ?, ?)""",
+        (admin_user_id, admin_email, reason, json.dumps(details)))
+    return cur.lastrowid
 
 
 def _compact(db):

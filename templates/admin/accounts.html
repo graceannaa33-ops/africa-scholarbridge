@@ -86,7 +86,7 @@
               <td class="text-nowrap">{{ e.created_at }}</td>
               <td>{{ e.admin_email }}</td>
               <td>{{ 'Deleted student account' if e.action == 'delete_student_account' else e.action }}</td>
-              <td class="text-nowrap">User #{{ e.target_user_id }} · Student #{{ e.target_student_id }} · {{ e.target_label }}</td>
+              <td class="text-nowrap text-muted">Student account (permanently deleted — no identifying details kept)</td>
               <td>{{ e.reason }}</td>
             </tr>
           {% else %}

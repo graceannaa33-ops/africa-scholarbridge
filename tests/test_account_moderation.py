@@ -1,5 +1,6 @@
 """User Accounts -> Account Management: access control, search, details,
 permanent deletion (records + files), CSRF, double-click safety, audit log."""
+import io
 import json
 import os
 import re
@@ -32,6 +33,16 @@ def execute(sql, args=()):
     rid = cur.lastrowid
     db.close()
     return rid
+
+
+def audit_max():
+    """Highest audit-row id right now; rows written later belong to this test.
+    (Deletion audit rows hold no student id or e-mail, so they cannot be found by student.)"""
+    return q("SELECT COALESCE(MAX(id), 0) FROM admin_audit_log")[0][0]
+
+
+def audits_since(base):
+    return [dict(r) for r in q("SELECT * FROM admin_audit_log WHERE id > ? ORDER BY id", (base,))]
 
 
 def make_admin():
@@ -181,6 +192,7 @@ def test_get_cannot_delete(client, student):
 
 @pytest.mark.parametrize("problem", ["no csrf", "wrong csrf", "no reason", "short reason", "wrong email", "not ticked"])
 def test_delete_requires_csrf_reason_and_explicit_confirmation(client, student, problem):
+    base = audit_max()
     target = user_id_of(student)
     as_admin(client)
     token = open_details(client, target)
@@ -201,7 +213,7 @@ def test_delete_requires_csrf_reason_and_explicit_confirmation(client, student, 
     r = delete(client, target, email, token, **kwargs)
     assert r.status_code == 303
     assert q("SELECT COUNT(*) FROM users WHERE id = ?", (target,))[0][0] == 1
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id = ?", (target,))[0][0] == 0
+    assert len(audits_since(base)) == 0
 
 
 # ---------------------------------------------------------------------
@@ -249,6 +261,7 @@ def test_list_shows_only_what_is_needed(client, student):
 
 
 def test_admin_and_visa_admin_accounts_are_never_listed_or_deletable(client):
+    base = audit_max()
     admin_uid, admin_email = as_admin(client)
     va_uid = execute("INSERT INTO users (email, password_hash, role) VALUES (?, 'x', 'visa_admin')", (admin_email,))
     execute("INSERT INTO visa_admins (user_id, full_name) VALUES (?, 'Visa Admin')", (va_uid,))
@@ -261,7 +274,7 @@ def test_admin_and_visa_admin_accounts_are_never_listed_or_deletable(client):
         r = delete(client, target, admin_email, "valid-token-for-this-test")
         assert r.status_code == 303
         assert q("SELECT COUNT(*) FROM users WHERE id = ?", (target,))[0][0] == 1
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id IN (?, ?)", (admin_uid, va_uid))[0][0] == 0
+    assert len(audits_since(base)) == 0
 
 
 def test_details_page_shows_account_and_impact(client, student):
@@ -272,15 +285,16 @@ def test_details_page_shows_account_and_impact(client, student):
     assert student["email"] in html and "Amina Wanjiru Otieno" in html
     assert "PERMANENT DELETION" in html
     flat = " ".join(html.replace("&#39;", "'").split())
-    assert ("This action permanently deletes this student's account, applications, uploaded documents, payment records, "
-            "visa information, and other associated data. This cannot be undone.") in flat
+    assert ("This action permanently deletes this student's account, application information, documents, "
+            "visa information, payment/application information, and uploaded files. This cannot be undone.") in flat
+    assert "Nothing about this student is kept in the application" in flat
     for step in ("1. Enter the student's email exactly", "2. Enter a deletion reason",
                  "3. I understand this deletion is permanent.", "4. Click <strong>Permanently Delete Account</strong>"):
         assert step in flat
     assert ">Permanently Delete Account</button>" in flat
     assert "deactivat" not in html.lower() and "archiv" not in html.lower()
     assert "1 visa-assistance request(s)" in flat and "1 M-PESA payment record(s)" in flat
-    assert "2 stored file(s)" in flat
+    assert "2 uploaded file(s)" in flat
     assert 'name="csrf_token"' in html and 'method="POST"' in html
 
 
@@ -288,6 +302,7 @@ def test_details_page_shows_account_and_impact(client, student):
 # 6-8, 13: the deletion itself
 # ---------------------------------------------------------------------
 def test_admin_deletes_account_records_files_and_audit(client, student):
+    base = audit_max()
     files = enrich(client, student)
     sid, uid = student["student_id"], user_id_of(student)
     admin_uid, admin_email = as_admin(client)
@@ -301,13 +316,14 @@ def test_admin_deletes_account_records_files_and_audit(client, student):
     assert found == {} and broken == []
     assert not os.path.exists(files["visa_file"]) and not os.path.exists(files["proof_file"])
 
-    audit = q("SELECT * FROM admin_audit_log WHERE target_user_id = ?", (uid,))
+    audit = audits_since(base)
     assert len(audit) == 1
     a = dict(audit[0])
     assert a["admin_user_id"] == admin_uid and a["admin_email"] == admin_email
-    assert a["action"] == "delete_student_account" and a["target_student_id"] == sid
+    assert a["action"] == "delete_student_account"
+    assert a["target_user_id"] is None and a["target_student_id"] is None and a["target_label"] is None   # de-identified
     assert a["reason"] == "Account violates platform rules/law." and a["created_at"]
-    assert student["email"] not in json.dumps(a) and a["target_label"].endswith("@example.com")
+    assert student["email"] not in json.dumps(a) and str(sid) not in (a["target_label"] or "")
     details = json.loads(a["details"])
     assert details["files"]["removed"] == 2 and details["removed"]["visa_requests"] == 1
     assert "Account violates platform rules/law." in page                  # shown in the audit panel
@@ -343,6 +359,7 @@ def test_deleted_students_open_session_is_signed_out_cleanly(client, student):
 
 
 def test_database_error_rolls_back_everything(client, student, monkeypatch):
+    base = audit_max()
     files = enrich(client, student)
     uid = user_id_of(student)
     as_admin(client)
@@ -351,19 +368,20 @@ def test_database_error_rolls_back_everything(client, student, monkeypatch):
 
     def boom(*a, **k):
         raise RuntimeError("simulated failure mid-deletion")
-    monkeypatch.setattr(account_moderation, "mask_email", boom)             # fails after the DELETE, before commit
+    monkeypatch.setattr(account_moderation, "_write_audit", boom)           # fails after the DELETE, before commit
     r = delete(client, uid, student["email"], token)
     assert r.status_code == 303
     assert q("SELECT COUNT(*) FROM users WHERE id = ?", (uid,))[0][0] == 1  # rolled back
     assert q("SELECT COUNT(*) FROM visa_requests WHERE student_id = ?", (student["student_id"],))[0][0] == 1
     assert os.path.exists(files["visa_file"]) and os.path.exists(files["proof_file"])
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id = ?", (uid,))[0][0] == 0
+    assert len(audits_since(base)) == 0
 
 
 # ---------------------------------------------------------------------
 # 9: double-click / concurrent deletion
 # ---------------------------------------------------------------------
 def test_double_click_delete_is_harmless(client, student):
+    base = audit_max()
     uid = user_id_of(student)
     as_admin(client)
     token = open_details(client, uid)
@@ -371,10 +389,11 @@ def test_double_click_delete_is_harmless(client, student):
     second = delete(client, uid, student["email"], token)
     assert first.status_code == 303 and second.status_code == 303
     assert "already deleted" in client.get("/admin/accounts").get_data(as_text=True)
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id = ?", (uid,))[0][0] == 1
+    assert len(audits_since(base)) == 1
 
 
 def test_simultaneous_deletes_run_once(client, student):
+    base = audit_max()
     enrich(client, student)
     uid = user_id_of(student)
     as_admin(client)
@@ -393,7 +412,7 @@ def test_simultaneous_deletes_run_once(client, student):
     [t.start() for t in threads]
     [t.join() for t in threads]
     assert results == [303] * 4                                             # no 500s
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id = ?", (uid,))[0][0] == 1
+    assert len(audits_since(base)) == 1
     assert q("SELECT COUNT(*) FROM users WHERE id = ?", (uid,))[0][0] == 0
 
 
@@ -445,6 +464,18 @@ def full_footprint(client, student):
                              AND d.stored_file IS NOT NULL""", (req,))[0][0]
     files["support_file"] = os.path.join(app_module.VISA_APP_DOCS_DIR, m["support_file"])
     assert os.path.exists(files["support_file"])
+    # a real Step 7 funding document, uploaded through the actual Documents step
+    cv = q("SELECT id FROM documents WHERE application_id = ? AND document_type = 'CV'", (app_id,))[0][0]
+    r = client.post("/application/step/documents",
+                    data={f"document_{cv}_availability": "yes",
+                          f"document_{cv}_file": (io.BytesIO(b"%PDF-1.4\n% fictional CV\n"), "my-cv.pdf")},
+                    content_type="multipart/form-data")
+    assert r.status_code == 302
+    stored = q("SELECT file_path FROM documents WHERE id = ?", (cv,))[0][0]
+    assert stored.startswith("funding_documents/")
+    m["funding_file"] = os.path.basename(stored)
+    files["funding_file"] = os.path.join(app_module.FUNDING_DOCS_DIR, m["funding_file"])
+    assert os.path.exists(files["funding_file"])
 
     execute("UPDATE students SET phone = ?, full_name = ? WHERE id = ?", (m["phone"], m["name"], sid))
     execute("""UPDATE funding_applications SET full_name = ?, phone = ?, personal_statement = ?, household_situation = ?,
@@ -520,6 +551,7 @@ def all_table_counts():
 
 
 def test_permanent_deletion_leaves_nothing_behind(client, student):
+    base = audit_max()
     f = full_footprint(client, student)
     before = footprint_counts(f, student["email"])
     assert all(before[t] >= 1 for t in PER_STUDENT_TABLES), before     # every table really had data
@@ -538,6 +570,7 @@ def test_permanent_deletion_leaves_nothing_behind(client, student):
     # 2. stored files are gone
     assert not os.path.exists(f["visa_file"]) and not os.path.exists(f["proof_file"])
     assert not os.path.exists(f["support_file"])
+    assert not os.path.exists(f["funding_file"])                       # Step 7 funding document too
 
     # 3. the student cannot log in, and cannot re-use the old session
     login = app_module.app.test_client()
@@ -553,15 +586,16 @@ def test_permanent_deletion_leaves_nothing_behind(client, student):
     assert not os.path.exists(os.environ["DATABASE_PATH"] + "-journal")
 
     # 5. the audit record survives with only the minimum
-    a = dict(q("SELECT * FROM admin_audit_log WHERE target_user_id = ?", (f["uid"],))[0])
+    a = dict(audits_since(base)[0])
     blob = json.dumps(a)
     for secret in (student["email"], f["phone"], f["name"], os.path.basename(f["visa_file"]),
                    os.path.basename(f["proof_file"]), "Amina"):
         assert secret not in blob
-    assert a["admin_user_id"] == admin_uid and a["target_label"].startswith(student["email"][0])
+    assert a["admin_user_id"] == admin_uid
+    assert a["target_user_id"] is None and a["target_student_id"] is None and a["target_label"] is None
     d = json.loads(a["details"])
     assert d["removed"]["contact_messages"] == 1 and d["removed"]["scam_reports"] == 1
-    assert d["files"] == {"to_delete": 3, "removed": 3, "already_missing": 0, "failed": 0}
+    assert d["files"] == {"to_delete": 4, "removed": 4, "already_missing": 0, "failed": 0}
 
 
 def test_other_students_data_is_fully_untouched(client, student):
@@ -600,13 +634,14 @@ def test_failed_transaction_rolls_back_every_table(client, student, monkeypatch)
 
     def boom(*a, **k):
         raise RuntimeError("simulated failure after the DELETEs")
-    monkeypatch.setattr(account_moderation, "mask_email", boom)
+    monkeypatch.setattr(account_moderation, "_write_audit", boom)
     r = delete(client, f["uid"], student["email"], token)
     assert r.status_code == 303
     assert "Nothing was changed" in client.get(f"/admin/accounts/{f['uid']}").get_data(as_text=True)
     assert all_table_counts() == before_all
     assert footprint_counts(f, student["email"]) == before
     assert os.path.exists(f["visa_file"]) and os.path.exists(f["proof_file"])
+    assert os.path.exists(f["funding_file"])                            # rolled back: files untouched
 
 
 def test_leftover_verification_aborts_the_whole_deletion(client, student, monkeypatch):
@@ -623,6 +658,7 @@ def test_leftover_verification_aborts_the_whole_deletion(client, student, monkey
 
 
 def test_file_cleanup_failure_is_reported_and_audited(client, student, monkeypatch):
+    base = audit_max()
     f = full_footprint(client, student)
     as_admin(client)
     token = open_details(client, f["uid"])
@@ -642,8 +678,8 @@ def test_file_cleanup_failure_is_reported_and_audited(client, student, monkeypat
     assert "Database deletion succeeded, but 1 stored file(s) could not be removed" in page
     assert footprint_counts(f, student["email"]) == {t: 0 for t in PER_STUDENT_TABLES}   # DB deletion stands
     assert not os.path.exists(f["visa_file"]) and os.path.exists(f["proof_file"])
-    d = json.loads(q("SELECT details FROM admin_audit_log WHERE target_user_id = ?", (f["uid"],))[0][0])
-    assert d["files"]["failed"] == 1 and d["files"]["removed"] == 2
+    d = json.loads(audits_since(base)[0]["details"])
+    assert d["files"]["failed"] == 1 and d["files"]["removed"] == 3
     os.remove(f["proof_file"])
 
 
@@ -663,13 +699,14 @@ def test_csrf_token_from_another_session_is_rejected(client, student):
 
 
 def test_double_click_deletes_once_with_full_cleanup(client, student):
+    base = audit_max()
     f = full_footprint(client, student)
     as_admin(client)
     token = open_details(client, f["uid"])
     first = delete(client, f["uid"], student["email"], token)
     second = delete(client, f["uid"], student["email"], token)
     assert first.status_code == second.status_code == 303
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id = ?", (f["uid"],))[0][0] == 1
+    assert len(audits_since(base)) == 1
     assert footprint_counts(f, student["email"]) == {t: 0 for t in PER_STUDENT_TABLES}
 
 
@@ -716,15 +753,16 @@ def test_audit_no_personal_value_survives_in_any_table_or_column(client, student
 
 
 def test_audit_record_is_minimal(client, student):
+    base = audit_max()
     f = full_footprint(client, student)
     _admin_delete(client, f, student["email"])
-    row = dict(q("SELECT * FROM admin_audit_log WHERE target_user_id = ?", (f["uid"],))[0])
+    row = dict(audits_since(base)[0])
     assert set(row) == {"id", "created_at", "admin_user_id", "admin_email", "action", "target_user_id",
                         "target_student_id", "target_label", "reason", "details"}
     blob = json.dumps(row).lower()
     for label, v in f["markers"].items():
         assert str(v).lower() not in blob, label
-    assert row["target_label"] == student["email"][0] + "***@example.com"
+    assert row["target_user_id"] is None and row["target_student_id"] is None and row["target_label"] is None
     d = json.loads(row["details"])
     assert set(d) == {"removed", "files"}
     assert all(isinstance(v, int) for v in d["removed"].values())         # counts only
@@ -750,7 +788,8 @@ def test_storage_has_no_files_or_references_left(client, student):
     second = _second_student()
     other = full_footprint(second["_client"], second)
     _admin_delete(client, f, student["email"])
-    names = {os.path.basename(f["visa_file"]), os.path.basename(f["proof_file"]), os.path.basename(f["support_file"])}
+    names = {os.path.basename(f["visa_file"]), os.path.basename(f["proof_file"]), os.path.basename(f["support_file"]),
+             os.path.basename(f["funding_file"])}
     on_disk = {n for _, _, fs in os.walk(app_module.UPLOAD_ROOT) for n in fs}
     assert names & on_disk == set()
     path_cols = []
@@ -764,6 +803,7 @@ def test_storage_has_no_files_or_references_left(client, student):
     db.close()
     assert len(path_cols) >= 7
     assert os.path.exists(other["visa_file"]) and os.path.exists(other["proof_file"])   # other student's kept
+    assert os.path.exists(other["funding_file"]) and os.path.exists(other["support_file"])
 
 
 def _second_student():
@@ -900,6 +940,7 @@ def _register(c, email, phone, password="N3wPassw0rd!", name="Fresh Start Studen
 
 
 def test_reregistration_after_deletion_is_a_completely_new_account(client, student):
+    base = audit_max()
     # a/b. a student with realistic records and real uploaded files
     f = full_footprint(client, student)
     email, phone = student["email"], f["phone"]
@@ -913,7 +954,7 @@ def test_reregistration_after_deletion_is_a_completely_new_account(client, stude
     # c. permanent deletion through Main Admin
     admin = app_module.app.test_client()
     assert _admin_delete(admin, f, email).status_code == 303
-    audit_before = [dict(r) for r in q("SELECT * FROM admin_audit_log WHERE target_user_id = ?", (old["uid"],))]
+    audit_before = [dict(r) for r in audits_since(base)]
     assert len(audit_before) == 1
 
     # d. account and personal data gone
@@ -978,10 +1019,11 @@ def test_reregistration_after_deletion_is_a_completely_new_account(client, stude
     assert r.status_code == 302 and "/login" in r.headers["Location"]  # old cookie never reaches the new account
 
     # the audit record is still there, unchanged, and did not block anything
-    assert [dict(r) for r in q("SELECT * FROM admin_audit_log WHERE target_user_id = ?", (old["uid"],))] == audit_before
+    assert [dict(r) for r in audits_since(base)] == audit_before
 
 
 def test_reregistered_account_can_itself_be_deleted_again(client, student):
+    base = audit_max()
     f = full_footprint(client, student)
     _admin_delete(app_module.app.test_client(), f, student["email"])
     c = app_module.app.test_client()
@@ -992,7 +1034,7 @@ def test_reregistered_account_can_itself_be_deleted_again(client, student):
     r = delete(admin, new_uid, student["email"], open_details(admin, new_uid))
     assert r.status_code == 303
     assert q("SELECT COUNT(*) FROM users WHERE lower(email) = lower(?)", (student["email"],))[0][0] == 0
-    assert q("SELECT COUNT(*) FROM admin_audit_log WHERE target_user_id IN (?, ?)", (f["uid"], new_uid))[0][0] == 2
+    assert len(audits_since(base)) == 2
 
 
 @pytest.mark.parametrize("variant", ["exact", "upper", "padded"])

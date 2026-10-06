@@ -56,6 +56,14 @@ def is_configured():
                 _env("MAIL_PASSWORD"), _env("MAIL_DEFAULT_SENDER")])
 
 
+_EMAIL_IN_TEXT = re.compile(r"([A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]*@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})")
+
+
+def mask_emails_in_text(value):
+    """'Refused: amina.yusuf@example.com' -> 'Refused: a***@example.com' (for logs)."""
+    return _EMAIL_IN_TEXT.sub(lambda m: f"{m.group(1)}***@{m.group(2)}", str(value))
+
+
 def is_valid_email(address):
     """A light sanity check before we ever attempt to send - not a full
     RFC 5322 validator, just enough to reject obviously-broken addresses
@@ -132,5 +140,7 @@ def send_email(to_address, subject, body):
     except Exception as exc:  # noqa: BLE001 - we deliberately want to catch and log any SMTP failure
         # Log the technical detail server-side only - never expose SMTP
         # errors (which can include hostnames/usernames) to the student.
-        logger.error("Failed to send email via SMTP: %s", exc)
+        # SMTP errors can echo recipient addresses (e.g. SMTPRecipientsRefused):
+        # mask every e-mail address so no full address reaches the logs.
+        logger.error("Failed to send email via SMTP: %s: %s", type(exc).__name__, mask_emails_in_text(exc))
         return False, "send_failed"

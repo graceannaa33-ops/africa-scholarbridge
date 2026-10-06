@@ -3093,7 +3093,9 @@ def _paystack_verify_attempt(db, payment):
     try:
         data = paystack_lib.verify(payment["paystack_reference"])
     except paystack_lib.PaystackError as exc:
-        app.logger.warning("Paystack verify failed for %s: %s", payment["paystack_reference"], exc)
+        # Never log the raw exception text: Paystack's message could contain a phone number.
+        app.logger.warning("Paystack verify failed for %s: %s %s", payment["paystack_reference"],
+                           paystack_lib.mask_in_text(exc), exc.diagnostics())
         return None
     return _apply_paystack_result(db, payment, data)
 
@@ -4225,7 +4227,7 @@ def admin_account_delete(user_id):
             flash(e, "danger")
         return redirect(url_for("admin_account_detail", user_id=user_id, delete=1)), 303
     upload_dirs = {"visa_documents": VISA_DOCS_DIR, "payment_proofs": PAYMENT_PROOF_DIR,
-                   "visa_application_documents": VISA_APP_DOCS_DIR}
+                   "visa_application_documents": VISA_APP_DOCS_DIR, "funding_documents": FUNDING_DOCS_DIR}
     try:
         outcome, info = account_moderation.delete_student_account(
             g.db, user_id, admin[0], admin[1], reason, upload_dirs)

@@ -40,8 +40,8 @@
       <div class="card border-danger h-100">
         <div class="card-body">
           <h5 class="fw-bold text-danger mb-2">PERMANENT DELETION</h5>
-          <p class="small fw-semibold mb-2">This action permanently deletes this student's account, applications, uploaded
-            documents, payment records, visa information, and other associated data. This cannot be undone.</p>
+          <p class="small fw-semibold mb-2">This action permanently deletes this student's account, application information, documents,
+            visa information, payment/application information, and uploaded files. This cannot be undone.</p>
           <p class="small text-muted mb-2">Scope: permanent deletion removes the student's data from the application's active database and application-managed storage. It does not control copies that may exist in infrastructure backups, snapshots, previously sent emails, or external systems.</p>
           {% set i = account.impact %}
           <p class="small mb-1">For this student, that is:</p>
@@ -50,7 +50,7 @@
             <li>{{ i.applications }} funding application(s) with all answers, history, matches, referrals, decisions and bank details</li>
             <li>{{ i.visa_requests }} visa-assistance request(s) with their visa information and history</li>
             <li>{{ i.mpesa_payments }} M-PESA payment record(s) and {{ i.disbursements }} disbursement record(s)</li>
-            <li>{{ i.stored_files }} stored file(s) (uploaded visa documents, M-PESA screenshots)</li>
+            <li>{{ i.stored_files }} uploaded file(s) (funding documents, visa documents, passport/ID and photo uploads, payment screenshots)</li>
             <li>{{ i.notifications }} notification(s), saved opportunities{% if i.contact_messages or i.scam_reports %}, {{ i.contact_messages }} contact message(s) and {{ i.scam_reports }} scam report(s) sent from this e-mail{% endif %}</li>
           </ul>
           {% if i.verified_payments or i.disbursements %}
@@ -81,8 +81,9 @@
       </div>
       <div class="modal-body">
         <p class="mb-2"><strong>{{ account.full_name }}</strong><br><span class="text-muted">{{ account.email }}</span></p>
-        <div class="alert alert-danger small fw-semibold">This action permanently deletes this student's account, applications,
-          uploaded documents, payment records, visa information, and other associated data. This cannot be undone.</div>
+        <div class="alert alert-danger small fw-semibold">This action permanently deletes this student's account, application information,
+          documents, visa information, payment/application information, and uploaded files. This cannot be undone.
+          Nothing about this student is kept in the application — not even in the audit log.</div>
         <p class="small text-muted mb-3">Scope: permanent deletion removes the student's data from the application's active database and application-managed storage. It does not control copies that may exist in infrastructure backups, snapshots, previously sent emails, or external systems.</p>
         <div class="mb-3">
           <label for="confirm_email" class="form-label fw-semibold">1. Enter the student's email exactly</label>

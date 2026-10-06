@@ -1143,6 +1143,13 @@ def _init_db():
         )
     """)
     cur.execute("CREATE INDEX IF NOT EXISTS ix_admin_audit_log_created ON admin_audit_log(created_at)")
+    # Permanent deletion leaves no student-specific record: deletion audit rows
+    # keep only which admin acted, when, why and the record counts. Rows written
+    # before this rule had a masked e-mail and the deleted user/student ids -
+    # remove those (idempotent; nothing else in the row changes).
+    cur.execute("""UPDATE admin_audit_log SET target_user_id = NULL, target_student_id = NULL, target_label = NULL
+                   WHERE action = 'delete_student_account'
+                     AND (target_user_id IS NOT NULL OR target_student_id IS NOT NULL OR target_label IS NOT NULL)""")
 
     # ---------------------------------------------------------------
     # VISA ASSISTANCE APPLICATION FORM (12 sections). The visa

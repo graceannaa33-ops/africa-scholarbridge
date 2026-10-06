@@ -703,7 +703,7 @@ def test_E_kenyan_phone_normalisation_and_friendly_rejection(client, student, pa
     rid = ready_to_pay(client, student)
     start(client, rid, phone="07123")
     assert "valid Kenyan M-PESA number" in flashes(client) and attempts(rid) == []
-    assert paystack_lib.mask_phone("+254712345678") == "+2547******78"
+    assert paystack_lib.mask_phone("+254712345678") == "+254*******78"
 
 
 @pytest.mark.parametrize("outcome", [{"status": "success", "amount": 15000},
@@ -819,7 +819,7 @@ def test_regression_http_400_charge_attempted_end_to_end_preserves_diagnostics(c
     assert any("message='Transaction reference not found'" in line and "http=404" in line for line in diag)
     log = caplog.text
     assert SECRET not in log and "Bearer" not in log
-    assert "712345678" not in log and "+2547******78" in log                 # phone masked even inside messages
+    assert "712345678" not in log and "+254*******78" in log                 # phone masked even inside messages
     # Genuine failure: never pending, never paid; the reason is kept and shown
     assert a["gateway_status"] == "failed" and a["payment_status"] == "PAYMENT_REJECTED" and not unlocked(rid)
     assert a["gateway_message"] == "Charge could not be completed for +254712345678"
