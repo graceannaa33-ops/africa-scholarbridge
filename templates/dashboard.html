@@ -152,9 +152,15 @@
       <h5 class="fw-bold mb-3">🏦 My Funding Payment Information</h5>
       {% if bank_details %}
         <table class="table table-sm mb-3">
+          <tr><th>Disbursement Method</th><td>{{ method_labels[payment_method] }}</td></tr>
+          {% if payment_method == 'mobile_money' %}
+          <tr><th>Provider</th><td>{{ bank_details.mobile_money_provider }}</td></tr>
+          <tr><th>Mobile Number</th><td>{{ masked_mobile }}</td></tr>
+          {% else %}
           <tr><th>Country</th><td>{{ bank_details.country }}</td></tr>
           <tr><th>Bank</th><td>{{ bank_details.bank_name }}</td></tr>
           <tr><th>Account</th><td>{{ masked_account }}</td></tr>
+          {% endif %}
           <tr><th>Status</th><td><span class="badge bg-success">✓ Information Submitted</span></td></tr>
         </table>
         <div class="d-flex gap-2">

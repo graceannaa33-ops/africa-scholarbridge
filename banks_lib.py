@@ -77,6 +77,12 @@ AFRICAN_COUNTRIES = [
 
 ACCOUNT_TYPES = ["Savings", "Current", "Other"]
 
+# How the applicant would like to receive funding (Bank Account / Disbursement
+# Information step). Stored in student_bank_details.payment_method; rows saved
+# before this choice existed have NULL there and are bank-account rows.
+DISBURSEMENT_METHODS = {"bank": "Bank Account", "mobile_money": "Mobile Money"}
+MOBILE_MONEY_PROVIDERS = ["M-PESA", "Airtel Money", "Other"]
+
 BANK_STATUS_CHOICES = ["Licensed", "Not Currently Licensed", "Under Review"]
 
 
@@ -95,6 +101,41 @@ def mask_account_number(account_number):
         return "•••• " + digits
     last4 = digits[-4:]
     return "•••• •••• " + last4
+
+
+def disbursement_method(details):
+    """'bank' or 'mobile_money' for a stored student_bank_details row
+    (None when there is no row). Rows saved before the choice existed
+    have no payment_method and were always bank-account rows."""
+    if not details:
+        return None
+    keys = details.keys() if hasattr(details, "keys") else []
+    method = details["payment_method"] if "payment_method" in keys else None
+    return method if method in DISBURSEMENT_METHODS else "bank"
+
+
+def mobile_number_digits(number):
+    return "".join(ch for ch in str(number or "") if ch.isdigit())
+
+
+def is_valid_mobile_number(number):
+    """Presence plus a light sanity check: only digits, spaces, '+', '-' or
+    brackets, and 9-15 digits in total (covers 07XXXXXXXX and +2547XXXXXXXX)."""
+    text = str(number or "").strip()
+    if not text or any(not (ch.isdigit() or ch in " +-()") for ch in text):
+        return False
+    return 9 <= len(mobile_number_digits(text)) <= 15
+
+
+def mask_mobile_number(number):
+    """Display-safe mobile money number, e.g. "0712345645" -> "07******45".
+    Like mask_account_number, the full number is never shown on a page."""
+    digits = mobile_number_digits(number)
+    if not digits:
+        return "—"
+    if len(digits) <= 4:
+        return "*" * len(digits)
+    return digits[:2] + "*" * (len(digits) - 4) + digits[-2:]
 
 
 def country_names():

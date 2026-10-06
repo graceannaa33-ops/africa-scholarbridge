@@ -269,8 +269,17 @@
                     {% if application.bank_step_status == 'COMPLETE' %}
                       <span class="badge bg-success">✓ Complete</span>
                       {% if review_bank %}
-                      <div class="small mt-1">{{ review_bank.bank_name }}<br>
-                        {{ review_bank.account_holder_name }} · {{ review_masked_account }}</div>
+                      <table class="table table-sm table-borderless small mt-1 mb-0" id="reviewDisbursement">
+                        <tr><th class="ps-0">Disbursement Method</th><td>{{ method_labels[review_method] }}</td></tr>
+                        {% if review_method == 'mobile_money' %}
+                        <tr><th class="ps-0">Provider</th><td>{{ review_bank.mobile_money_provider }}</td></tr>
+                        <tr><th class="ps-0">Mobile Number</th><td>{{ review_masked_mobile }}</td></tr>
+                        {% else %}
+                        <tr><th class="ps-0">Bank</th><td>{{ review_bank.bank_name }}</td></tr>
+                        <tr><th class="ps-0">Account Holder</th><td>{{ review_bank.account_holder_name }}</td></tr>
+                        <tr><th class="ps-0">Account Number</th><td>{{ review_masked_account }}</td></tr>
+                        {% endif %}
+                      </table>
                       {% endif %}
                     {% elif application.bank_step_status == 'NOT_REQUIRED' %}
                       <span class="badge bg-success">✓ Not Required for Your Matches</span>

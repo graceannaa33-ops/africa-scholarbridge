@@ -74,8 +74,12 @@ def student(client):
 
 
 TEST_BANK_DETAILS = {
-    "action": "save_details", "country": "Kenya", "manual_bank_name": "Example Bank",
+    "action": "save_details", "payment_method": "bank", "country": "Kenya", "manual_bank_name": "Example Bank",
     "account_holder_name": "Alex Testperson", "account_number": "TEST-ACCOUNT-001", "account_type": "Savings",
+}
+TEST_MOBILE_MONEY_DETAILS = {
+    "action": "save_details", "payment_method": "mobile_money", "mobile_money_provider": "M-PESA",
+    "mobile_money_number": "0712 345 645",
 }
 # Fields no longer asked for on the bank step (columns kept in the database).
 REMOVED_BANK_FIELDS = {"branch": "Example Branch", "bank_code": "TEST-BANK-001", "swift_bic": "TESTSWIFTXXX",

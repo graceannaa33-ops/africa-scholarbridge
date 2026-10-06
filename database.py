@@ -922,6 +922,14 @@ def _init_db():
         )
     """)
 
+    # How the applicant wants to receive funding: 'bank' or 'mobile_money'.
+    # NULL on rows saved before the choice existed - those are bank rows
+    # (banks_lib.disbursement_method). Mobile-money-only rows store '' in the
+    # NOT NULL bank columns; no column is dropped or rebuilt.
+    sbd_cols = {row[1] for row in cur.execute("PRAGMA table_info(student_bank_details)").fetchall()}
+    if "payment_method" not in sbd_cols:
+        _add_column(cur, "student_bank_details", "payment_method", "TEXT")
+
     # ---------------------------------------------------------------
     # FUNDING DISBURSEMENTS - the actual payout-tracking record for an
     # awarded student, one row per provider referral. Only an authorized

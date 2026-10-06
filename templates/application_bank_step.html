@@ -1,6 +1,25 @@
 {% extends "base.html" %}
 {% block title %}Annual Funding Application — 🏦 Bank Account / Disbursement Information — Africa ScholarBridge{% endblock %}
 {% block content %}
+{% macro payment_details(d) -%}
+  <table class="table table-sm" id="disbursementDetails">
+    <tr><th>Disbursement Method</th><td>{{ method_labels[payment_method] }}</td></tr>
+    {% if payment_method == 'mobile_money' %}
+    <tr><th>Mobile Money Provider</th><td>{{ d.mobile_money_provider }}</td></tr>
+    <tr><th>Mobile Money Number</th><td>{{ masked_mobile }}</td></tr>
+    {% else %}
+    <tr><th>Country</th><td>{{ d.country }}</td></tr>
+    <tr><th>Bank</th><td>{{ d.bank_name }}
+      {% if d.verification_status == 'MANUAL_REVIEW' and d.confirmed %}
+        <span class="badge bg-warning text-dark ms-1">Manually Entered — Under Review</span>
+      {% endif %}
+    </td></tr>
+    <tr><th>Account Holder</th><td>{{ d.account_holder_name }}</td></tr>
+    <tr><th>Account Number</th><td>{{ masked_account }}</td></tr>
+    <tr><th>Account Type</th><td>{{ d.account_type }}</td></tr>
+    {% endif %}
+  </table>
+{%- endmacro %}
 <div class="container py-4">
 
   {% include '_application_progress.html' %}
@@ -12,31 +31,18 @@
 
           {% if existing_details and existing_details.confirmed %}
             <h4 class="fw-bold mb-3 text-success">✅ Bank Account / Disbursement Information Saved</h4>
-            <p class="text-muted mb-3">Your bank account details have been recorded for this annual application.</p>
+            <p class="text-muted mb-3">Your funding payment details have been recorded for this annual application.</p>
             {% if application.requested_amount_ksh %}
             <div class="border rounded bg-light p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2" id="requestedAmount">
               <span>Requested Funding Amount: <strong>KSh {{ "{:,}".format(application.requested_amount_ksh) }}</strong></span>
               <span class="small text-muted">Requested amount only — final funding decisions are subject to review.</span>
             </div>
             {% endif %}
-            <table class="table table-sm">
-              <tr><th>Country</th><td>{{ existing_details.country }}</td></tr>
-              <tr><th>Bank</th><td>{{ existing_details.bank_name }}
-                {% if existing_details.verification_status == 'MANUAL_REVIEW' %}
-                  <span class="badge bg-warning text-dark ms-1">Manually Entered — Under Review</span>
-                {% endif %}
-              </td></tr>
-              <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
-              <tr><th>Account</th><td>{{ masked_account }}</td></tr>
-              <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
-              {% if existing_details.mobile_money_provider %}
-              <tr><th>Mobile Money</th><td>{{ existing_details.mobile_money_provider }} — •••• {{ (existing_details.mobile_money_number or '')[-4:] }}</td></tr>
-              {% endif %}
-            </table>
+            {{ payment_details(existing_details) }}
             <div class="alert alert-info small">
               If your funding application is approved by the relevant funding provider, payment will be handled
               according to that provider's official disbursement process. Africa ScholarBridge does not guarantee
-              or directly send funding money. Providing bank details does not guarantee funding approval.
+              or directly send funding money. Providing payment details does not guarantee funding approval.
             </div>
             <div class="d-flex gap-2">
               <form method="POST">
@@ -51,7 +57,7 @@
 
           {% elif existing_details and not editing %}
             <h4 class="fw-bold mb-3">Confirm Bank Account / Disbursement Information</h4>
-            <p class="text-muted mb-3">Please carefully check your bank details before submitting.</p>
+            <p class="text-muted mb-3">Please carefully check your payment details before submitting.</p>
             {% if missing_bank_fields %}
             <div class="alert alert-warning small" role="alert">Still needed before you can confirm: {{ missing_bank_fields|join(', ') }}. Please use “Edit these details”.</div>
             {% endif %}
@@ -61,22 +67,13 @@
               <span class="small text-muted">Requested amount only — final funding decisions are subject to review.</span>
             </div>
             {% endif %}
-            <table class="table table-sm">
-              <tr><th>Country</th><td>{{ existing_details.country }}</td></tr>
-              <tr><th>Bank</th><td>{{ existing_details.bank_name }}</td></tr>
-              <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
-              <tr><th>Account</th><td>{{ masked_account }}</td></tr>
-              <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
-              {% if existing_details.mobile_money_provider %}
-              <tr><th>Mobile Money <span class="text-muted small">(optional, in addition to your bank account)</span></th><td>{{ existing_details.mobile_money_provider }} — •••• {{ (existing_details.mobile_money_number or '')[-4:] }}</td></tr>
-              {% endif %}
-            </table>
+            {{ payment_details(existing_details) }}
             <p class="small text-muted mb-3">These details may be used only for funding disbursement if your application is approved.</p>
             <form method="POST">
               <input type="hidden" name="action" value="confirm">
               <div class="form-check mb-3">
                 <input class="form-check-input" type="checkbox" name="confirm_accurate" id="confirmAccurate" required>
-                <label class="form-check-label" for="confirmAccurate">I confirm that the bank information I provided is accurate.</label>
+                <label class="form-check-label" for="confirmAccurate">I confirm that the payment information I provided is accurate.</label>
               </div>
               <div class="d-flex gap-2">
                 <button type="submit" class="btn btn-primary fw-semibold">SAVE &amp; CONTINUE</button>
@@ -91,6 +88,7 @@
             {% set ed = existing_details if editing else None %}
             <h4 class="fw-bold mb-3">🏦 Bank Account / Disbursement Information{% if ed %} — Edit{% endif %}</h4>
             <p class="mb-3">Provide the account details that could be used for funding disbursement if your application is approved. Providing bank details does not guarantee funding approval.</p>
+            {% set chosen = payment_method if ed else None %}
             {% if application.requested_amount_ksh %}
             <div class="border rounded bg-light p-3 mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2" id="requestedAmount">
               <span>Requested Funding Amount: <strong>KSh {{ "{:,}".format(application.requested_amount_ksh) }}</strong></span>
@@ -102,9 +100,21 @@
             <form method="POST" id="bankDetailsForm">
               <input type="hidden" name="action" value="save_details">
 
+              <fieldset class="mb-3" id="paymentMethodChoice">
+                <legend class="form-label fw-semibold fs-6">How would you like to receive funding? <span class="text-danger">*</span></legend>
+                {% for value, label in method_labels.items() %}
+                <div class="form-check form-check-inline">
+                  <input class="form-check-input payment-method-choice" type="radio" name="payment_method" id="method_{{ value }}"
+                         value="{{ value }}" {{ 'checked' if chosen == value }} required>
+                  <label class="form-check-label" for="method_{{ value }}">{{ label }}</label>
+                </div>
+                {% endfor %}
+              </fieldset>
+
+              <div id="bankFields" class="{{ '' if chosen == 'bank' else 'd-none' }}">
               <div class="mb-3">
                 <label class="form-label fw-semibold">Country <span class="text-danger">*</span></label>
-                <select name="country" id="bankCountry" class="form-select" required>
+                <select name="country" id="bankCountry" class="form-select" data-method-required="bank" {{ 'required' if chosen == 'bank' }}>
                   <option value="">Select your country…</option>
                   {% for c in countries %}
                     <option value="{{ c }}" {{ 'selected' if ed and ed.country == c }}>{{ c }}</option>
@@ -130,16 +140,16 @@
               <div class="row g-3 mb-3">
                 <div class="col-md-6">
                   <label class="form-label">Account Holder Name <span class="text-danger">*</span></label>
-                  <input type="text" name="account_holder_name" class="form-control" placeholder="e.g. Alex Testperson" maxlength="200" value="{{ ed.account_holder_name or '' if ed else '' }}" required>
+                  <input type="text" name="account_holder_name" class="form-control" placeholder="e.g. Alex Testperson" maxlength="200" value="{{ ed.account_holder_name or '' if ed else '' }}" data-method-required="bank" {{ 'required' if chosen == 'bank' }}>
                   <div class="form-text">Exactly as it appears on your account.</div>
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Account Number <span class="text-danger">*</span></label>
-                  {% if ed and ed.account_number %}
+                  {% if ed and (ed.account_number or '').strip() %}
                   <input type="text" name="account_number" class="form-control" autocomplete="off" placeholder="Leave blank to keep {{ masked_account }}" maxlength="64">
                   <div class="form-text">Saved account: {{ masked_account }}. Leave blank to keep it, or type a new number to replace it.</div>
                   {% else %}
-                  <input type="text" name="account_number" class="form-control" autocomplete="off" placeholder="e.g. TEST-ACCOUNT-001" maxlength="64" required>
+                  <input type="text" name="account_number" class="form-control" autocomplete="off" placeholder="e.g. TEST-ACCOUNT-001" maxlength="64" data-method-required="bank" {{ 'required' if chosen == 'bank' }}>
                   {% endif %}
                 </div>
                 <div class="col-md-6">
@@ -150,17 +160,29 @@
                 </div>
               </div>
 
-              <div class="border rounded p-3 mb-3">
-                <p class="fw-semibold mb-2">Mobile Money <span class="text-muted small fw-normal">(optional, in addition to your bank account — where legitimately supported by your provider)</span></p>
-                <p class="small text-muted mb-2">Mobile money does not replace your bank account: the bank fields above are still required.</p>
-                <div class="row g-2">
+              </div>
+
+              <div id="mobileMoneyFields" class="border rounded p-3 mb-3 {{ '' if chosen == 'mobile_money' else 'd-none' }}">
+                <div class="row g-3">
                   <div class="col-md-6">
-                    <label class="form-label small">Mobile Money Provider</label>
-                    <input type="text" name="mobile_money_provider" class="form-control" placeholder="e.g. M-Pesa" value="{{ ed.mobile_money_provider or '' if ed else '' }}">
+                    <label class="form-label" for="mobileMoneyProvider">Mobile Money Provider <span class="text-danger">*</span></label>
+                    <select name="mobile_money_provider" id="mobileMoneyProvider" class="form-select" data-method-required="mobile_money" {{ 'required' if chosen == 'mobile_money' }}>
+                      <option value="">Select your provider…</option>
+                      {% for p in mobile_money_providers %}
+                      <option value="{{ p }}" {{ 'selected' if ed and ed.mobile_money_provider == p }}>{{ p }}</option>
+                      {% endfor %}
+                    </select>
                   </div>
                   <div class="col-md-6">
-                    <label class="form-label small">Mobile Money Number</label>
-                    <input type="text" name="mobile_money_number" class="form-control" placeholder="e.g. +254 700 000 001" value="{{ ed.mobile_money_number or '' if ed else '' }}">
+                    <label class="form-label" for="mobileMoneyNumber">Mobile Money Number <span class="text-danger">*</span></label>
+                    {% if ed and ed.mobile_money_number %}
+                    <input type="tel" name="mobile_money_number" id="mobileMoneyNumber" class="form-control" autocomplete="off" maxlength="20"
+                           placeholder="Leave blank to keep {{ masked_mobile }}">
+                    <div class="form-text">Saved number: {{ masked_mobile }}. Leave blank to keep it, or type a new number.</div>
+                    {% else %}
+                    <input type="tel" name="mobile_money_number" id="mobileMoneyNumber" class="form-control" autocomplete="off" maxlength="20"
+                           placeholder="e.g. 0712 345 678" data-method-required="mobile_money" {{ 'required' if chosen == 'mobile_money' }}>
+                    {% endif %}
                   </div>
                 </div>
               </div>
@@ -240,6 +262,25 @@
                   renderBanks(filtered);
                 });
 
+                // Bank Account <-> Mobile Money. Hiding a section never clears what
+                // was typed in it, so switching back and forth loses nothing; only
+                // the visible section's fields are required.
+                var bankFields = document.getElementById('bankFields');
+                var mobileFields = document.getElementById('mobileMoneyFields');
+                function applyMethod() {
+                  var picked = document.querySelector('.payment-method-choice:checked');
+                  var method = picked ? picked.value : '';
+                  bankFields.classList.toggle('d-none', method !== 'bank');
+                  mobileFields.classList.toggle('d-none', method !== 'mobile_money');
+                  document.querySelectorAll('[data-method-required]').forEach(function (el) {
+                    el.required = el.dataset.methodRequired === method;
+                  });
+                  if (method === 'bank') { applyNotListed(); } else { manualBankName.required = false; }
+                }
+                document.querySelectorAll('.payment-method-choice').forEach(function (r) {
+                  r.addEventListener('change', applyMethod);
+                });
+
                 function applyNotListed() {
                   if (notListed.checked) {
                     bankSelect.disabled = true;
@@ -258,8 +299,8 @@
                 // restore the "not listed" state so nothing has to be retyped.
                 if (countrySelect.value) {
                   loadBanks(countrySelect.value);
-                  applyNotListed();
                 }
+                applyMethod();
               })();
             </script>
           {% endif %}

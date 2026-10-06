@@ -1406,7 +1406,7 @@ def dashboard():
 
     # 🏦 Funding Payment Information + Funding Payment Status (dashboard).
     bank_details = None
-    masked_account = None
+    masked_account = masked_mobile = payment_method = None
     disbursement = None
     if application:
         bank_details = db.execute(
@@ -1415,6 +1415,8 @@ def dashboard():
         ).fetchone()
         if bank_details:
             masked_account = banks_lib.mask_account_number(bank_details["account_number"])
+            masked_mobile = banks_lib.mask_mobile_number(bank_details["mobile_money_number"])
+            payment_method = banks_lib.disbursement_method(bank_details)
         disbursement = db.execute(
             """SELECT fd.*, o.title AS opportunity_title FROM funding_disbursements fd
                LEFT JOIN funding_opportunities o ON fd.opportunity_id = o.id
@@ -1429,6 +1431,7 @@ def dashboard():
         has_us_match=has_us_match, visa_request=visa_request, visa_tracker=visa_tracker,
         us_gov_fee=visa_lib.US_GOV_VISA_FEE_USD, format_price=visa_lib.format_price,
         bank_details=bank_details, masked_account=masked_account, disbursement=disbursement,
+        masked_mobile=masked_mobile, payment_method=payment_method, method_labels=banks_lib.DISBURSEMENT_METHODS,
     )
 
 
@@ -1473,19 +1476,28 @@ VISA_STEP_NOT_READY_MESSAGE = ("Please complete and review all of your applicati
                                "Visa Verification is the final step.")
 
 
-BANK_DETAILS_INCOMPLETE_MESSAGE = ("Please complete your bank account details for funding disbursement: {}. "
-                                   "Mobile money details are optional and cannot replace your bank account.")
+BANK_DETAILS_INCOMPLETE_MESSAGE = "Please complete your funding payment details: {}."
+CHOOSE_DISBURSEMENT_METHOD_MESSAGE = ("Please choose how you would like to receive funding: "
+                                      "Bank Account or Mobile Money.")
 
 
 def _bank_details_missing(details):
     """Required disbursement fields missing from a stored student_bank_details
-    row (or all of them when there is no row). Mobile money is deliberately
-    NOT considered here: it is optional extra information and never
-    substitutes for the bank account itself."""
+    row, for the method the applicant chose:
+      Bank Account -> Country, Bank Name, Account Holder Name, Account Number
+      Mobile Money -> Mobile Money Provider, Mobile Money Number
+    The other method's fields are never required. No row at all means the
+    method itself has not been chosen yet."""
     if not details:
-        return ["Bank Name", "Account Holder Name", "Account Number"]
+        return ["How you would like to receive funding"]
+    if banks_lib.disbursement_method(details) == "mobile_money":
+        return [label for ok, label in (
+            ((details["mobile_money_provider"] or "").strip(), "Mobile Money Provider"),
+            (banks_lib.is_valid_mobile_number(details["mobile_money_number"]), "Mobile Money Number"),
+        ) if not ok]
     bank_name = (details["bank_name"] or "").strip()
     return [label for ok, label in (
+        ((details["country"] or "").strip(), "Country"),
         (bank_name and bank_name != "Not specified", "Bank Name"),
         ((details["account_holder_name"] or "").strip(), "Account Holder Name"),
         ((details["account_number"] or "").strip(), "Account Number"),
@@ -1787,80 +1799,101 @@ def application_step(step_name):
                 return redirect(url_for("application_step", step_name=APPLICATION_STEPS[step_index + 1]))
 
             if action == "save_details":
-                country = request.form.get("country", "").strip()
-                bank_id = request.form.get("bank_id") or None
-                manual_bank_name = request.form.get("manual_bank_name", "").strip()
-                account_holder_name = request.form.get("account_holder_name", "").strip()
-                account_number = request.form.get("account_number", "").strip()
-                account_type = request.form.get("account_type", "Savings")
-                # Branch, Bank Code, SWIFT/BIC, IBAN and Routing Number are no
-                # longer asked for. Their columns stay in student_bank_details
-                # for backward compatibility; values saved before are kept.
-                mobile_money_provider = request.form.get("mobile_money_provider", "").strip()
-                mobile_money_number = request.form.get("mobile_money_number", "").strip()
-
-                if not country or country not in banks_lib.country_names():
-                    flash("Please select a valid country.", "danger")
-                    return redirect(url_for("application_step", step_name="bank"))
-                if account_type not in banks_lib.ACCOUNT_TYPES:
-                    account_type = "Other"
-
-                bank_row = None
-                if bank_id:
-                    bank_row = db.execute(
-                        "SELECT * FROM banks WHERE id = ? AND country = ? AND is_active = 1", (bank_id, country)
-                    ).fetchone()
-
-                # Required for disbursement: country (checked above), bank name
-                # (from the directory or typed), account holder and account
-                # number (an edit may leave it blank to keep the stored one).
-                # Account type and mobile money are optional. No format rules
-                # beyond presence, so legitimate international formats are
-                # never rejected.
-                missing = [label for ok, label in (
-                    (bank_row or manual_bank_name, "Bank Name"),
-                    (account_holder_name, "Account Holder Name"),
-                    (account_number or (existing_details and existing_details["account_number"]), "Account Number"),
-                ) if not ok]
-                if missing:
-                    flash("Please fill in: " + ", ".join(missing) + ".", "danger")
-                    # Mobile money alone never satisfies the bank account fields.
+                # 1. How would you like to receive funding? (required)
+                method = (request.form.get("payment_method") or "").strip()
+                if method not in banks_lib.DISBURSEMENT_METHODS:
+                    flash(CHOOSE_DISBURSEMENT_METHOD_MESSAGE, "danger")
+                    return redirect(url_for("application_step", step_name="bank",
+                                            **({"edit": 1} if existing_details else {})))
+                def back_to_form():
                     if existing_details:
                         return redirect(url_for("application_step", step_name="bank", edit=1))
                     return redirect(url_for("application_step", step_name="bank"))
 
-                bank_name_final = bank_row["bank_name"] if bank_row else (manual_bank_name or None)
-                verification_status = "DIRECTORY_MATCH" if bank_row else "MANUAL_REVIEW"
+                # Only the CHOSEN method's fields are read and validated. The
+                # other method's details already saved are kept as they are,
+                # so switching back and forth never throws data away.
+                # (Branch, Bank Code, SWIFT/BIC, IBAN and Routing Number are
+                # not asked for; their columns are kept and never overwritten.)
+                if method == "bank":
+                    country = request.form.get("country", "").strip()
+                    bank_id = request.form.get("bank_id") or None
+                    manual_bank_name = request.form.get("manual_bank_name", "").strip()
+                    account_holder_name = request.form.get("account_holder_name", "").strip()
+                    account_number = request.form.get("account_number", "").strip()
+                    account_type = request.form.get("account_type", "Savings")
+                    if account_type not in banks_lib.ACCOUNT_TYPES:
+                        account_type = "Other"
+                    country_ok = country in banks_lib.country_names()
+                    bank_row = None
+                    if bank_id and country_ok:
+                        bank_row = db.execute(
+                            "SELECT * FROM banks WHERE id = ? AND country = ? AND is_active = 1", (bank_id, country)
+                        ).fetchone()
+                    # Required: Country, Bank Name (directory or typed), Account
+                    # Holder Name, Account Number (an edit may leave it blank to
+                    # keep the stored one). Account Type is optional. No format
+                    # rules beyond presence, so international formats are fine.
+                    kept_number = existing_details["account_number"] if existing_details else ""
+                    missing = [label for ok, label in (
+                        (country_ok, "Country"),
+                        (bank_row or manual_bank_name, "Bank Name"),
+                        (account_holder_name, "Account Holder Name"),
+                        (account_number or kept_number, "Account Number"),
+                    ) if not ok]
+                    if missing:
+                        flash("Please fill in: " + ", ".join(missing) + ".", "danger")
+                        return back_to_form()
+                    bank_values = {
+                        "country": country, "bank_id": bank_row["id"] if bank_row else None,
+                        "bank_name": bank_row["bank_name"] if bank_row else manual_bank_name,
+                        "account_holder_name": account_holder_name,
+                        "account_number": account_number or kept_number,
+                        "account_type": account_type, "currency": banks_lib.currency_for_country(country),
+                        "verification_status": "DIRECTORY_MATCH" if bank_row else "MANUAL_REVIEW",
+                    }
+                    mm_values = {}
+                else:
+                    provider = request.form.get("mobile_money_provider", "").strip()
+                    number = " ".join(request.form.get("mobile_money_number", "").split())
+                    kept_mm = existing_details["mobile_money_number"] if existing_details else None
+                    # An edit may leave the number blank to keep the stored one.
+                    number = number or (kept_mm if banks_lib.is_valid_mobile_number(kept_mm) else "")
+                    problems = []
+                    if provider not in banks_lib.MOBILE_MONEY_PROVIDERS:
+                        problems.append("Mobile Money Provider")
+                    if not banks_lib.is_valid_mobile_number(number):
+                        problems.append("Mobile Money Number")
+                    if problems:
+                        flash("Please fill in: " + ", ".join(problems) + "."
+                              + (" Enter a valid mobile number, e.g. 0712 345 678." if "Mobile Money Number" in problems
+                                 else ""), "danger")
+                        return back_to_form()
+                    mm_values = {"mobile_money_provider": provider, "mobile_money_number": number}
+                    bank_values = {}
 
                 if existing_details:
-                    # Leaving account_number blank on an edit keeps the
-                    # existing stored value - the student is never forced
-                    # to re-type a number just to fix an unrelated field.
-                    kept_account_number = account_number or existing_details["account_number"]
+                    updates = {"payment_method": method, **bank_values, **mm_values}
+                    set_clause = ", ".join(f"{k} = ?" for k in updates)
                     db.execute(
-                        """UPDATE student_bank_details
-                           SET country = ?, bank_id = ?, bank_name = ?, account_holder_name = ?,
-                               account_number = ?, account_type = ?, currency = ?,
-                               mobile_money_provider = ?, mobile_money_number = ?,
-                               verification_status = ?, confirmed = 0, updated_at = CURRENT_TIMESTAMP
-                           WHERE application_id = ?""",
-                        (country, bank_row["id"] if bank_row else None, bank_name_final or "Not specified",
-                         account_holder_name or existing_details["account_holder_name"], kept_account_number,
-                         account_type, banks_lib.currency_for_country(country),
-                         mobile_money_provider or None, mobile_money_number or None,
-                         verification_status, application["id"]),
+                        f"UPDATE student_bank_details SET {set_clause}, confirmed = 0, updated_at = CURRENT_TIMESTAMP "
+                        "WHERE application_id = ?",
+                        (*updates.values(), application["id"]),
                     )
                 else:
+                    # A fresh mobile-money row stores '' in the NOT NULL bank
+                    # columns (nothing to keep yet); a fresh bank row has no
+                    # mobile money details.
+                    row = {"country": "", "bank_id": None, "bank_name": "", "account_holder_name": "",
+                           "account_number": "", "account_type": "Savings", "currency": None,
+                           "verification_status": "MANUAL_REVIEW",
+                           "mobile_money_provider": None, "mobile_money_number": None,
+                           **bank_values, **mm_values, "payment_method": method}
+                    cols = ", ".join(row)
                     db.execute(
-                        """INSERT INTO student_bank_details
-                           (student_id, application_id, country, bank_id, bank_name, account_holder_name,
-                            account_number, account_type,
-                            currency, mobile_money_provider, mobile_money_number, verification_status, confirmed)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
-                        (student["id"], application["id"], country, bank_row["id"] if bank_row else None,
-                         bank_name_final or "Not specified", account_holder_name, account_number, account_type,
-                         banks_lib.currency_for_country(country),
-                         mobile_money_provider or None, mobile_money_number or None, verification_status),
+                        f"INSERT INTO student_bank_details (student_id, application_id, {cols}, confirmed) "
+                        f"VALUES (?, ?, {', '.join('?' * len(row))}, 0)",
+                        (student["id"], application["id"], *row.values()),
                     )
                 db.commit()
                 # Falls through to GET below, which now shows the
@@ -1928,6 +1961,9 @@ def application_step(step_name):
             existing_details=existing_details, masked_account=masked_account, editing=editing,
             missing_bank_fields=_bank_details_missing(existing_details) if existing_details else [],
             countries=banks_lib.country_names(), account_types=banks_lib.ACCOUNT_TYPES,
+            payment_method=banks_lib.disbursement_method(existing_details),
+            method_labels=banks_lib.DISBURSEMENT_METHODS, mobile_money_providers=banks_lib.MOBILE_MONEY_PROVIDERS,
+            masked_mobile=banks_lib.mask_mobile_number(existing_details["mobile_money_number"]) if existing_details else None,
         )
 
     if request.method == "POST":
@@ -2077,19 +2113,23 @@ def application_step(step_name):
     db.commit()
     documents = db.execute("SELECT * FROM documents WHERE application_id = ? ORDER BY id",
                            (application["id"],)).fetchall()
-    review_bank, review_masked_account = None, None
+    review_bank, review_masked_account, review_masked_mobile, review_method = None, None, None, None
     if step_name == "review":
-        # Shown masked only - the full account number never reaches the page.
+        # Shown masked only - the full account / mobile number never reaches the page.
         review_bank = db.execute("SELECT * FROM student_bank_details WHERE application_id = ? AND confirmed = 1",
                                  (application["id"],)).fetchone()
         if review_bank:
+            review_method = banks_lib.disbursement_method(review_bank)
             review_masked_account = banks_lib.mask_account_number(review_bank["account_number"])
+            review_masked_mobile = banks_lib.mask_mobile_number(review_bank["mobile_money_number"])
 
     return render_template(
         "application.html", application=application, step_name=step_name, step_index=step_index,
         steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES, documents=documents,
         missing_documents=_missing_funding_documents(documents),
         review_bank=review_bank, review_masked_account=review_masked_account,
+        review_masked_mobile=review_masked_mobile, review_method=review_method,
+        method_labels=banks_lib.DISBURSEMENT_METHODS,
         education_levels=EDUCATION_LEVELS, funding_need_levels=FUNDING_NEED_LEVELS,
         funding_need_categories=FUNDING_NEED_CATEGORIES, support_options=SOURCE_OF_SUPPORT_OPTIONS,
         support_parts=_source_of_support_parts(application["source_of_support"]),

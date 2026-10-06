@@ -27,6 +27,7 @@ import pytest
 import app as app_module
 import database
 from conftest import (APPLICANT, COMPLETE_EDUCATION, PNG_BYTES, REMOVED_BANK_FIELDS, TEST_BANK_DETAILS,
+                      TEST_MOBILE_MONEY_DETAILS,
                       VISA_FORM_ANSWERS,
                       choose_yes, complete_bank_step, count_applications, funding_documents_payload,
                       get_application, upload, visa_request_for, visa_requests_for)
@@ -530,19 +531,15 @@ def test_mobile_money_only_cannot_complete_the_bank_step(client, drafter):
     assert r.headers["Location"].endswith("/application/step/bank")
 
 
-def test_bank_details_with_optional_mobile_money_persist(client, drafter):
+def test_bank_account_details_persist(client, drafter):
     to_bank(client)
-    complete_bank_step(client, account_type="Current", mobile_money_provider="M-Pesa",
-                       mobile_money_number="+254 700 000 009")
+    complete_bank_step(client, account_type="Current")
     row = bank_row(drafter["application_id"])
-    assert row["confirmed"] == 1
+    assert row["confirmed"] == 1 and row["payment_method"] == "bank"
     assert (row["country"], row["bank_name"], row["account_holder_name"], row["account_number"], row["account_type"]) == (
         "Kenya", "Example Bank", "Alex Testperson", FULL_ACCOUNT_NUMBER, "Current")
-    assert (row["mobile_money_provider"], row["mobile_money_number"]) == ("M-Pesa", "+254 700 000 009")
     assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
-    page = html(client, "/application/step/bank")
-    assert FULL_ACCOUNT_NUMBER not in page
-    assert "+254 700 000 009" not in page
+    assert FULL_ACCOUNT_NUMBER not in html(client, "/application/step/bank")
 
 
 def test_edit_reopens_a_prefilled_form_without_the_account_number(client, drafter):
@@ -626,7 +623,10 @@ def test_review_shows_bank_masked_and_the_requested_summary(client, drafter):
                  "✓ Complete", "Example Bank",
                  "Final step — next, after this review"):
         assert text in page, text
-    assert "Alex Testperson · •••• •••• T001" in page
+    block = page.split('id="reviewDisbursement"', 1)[1].split("</table>", 1)[0]
+    assert "Disbursement Method</th><td>Bank Account" in block
+    assert "Account Holder</th><td>Alex Testperson" in block
+    assert "Account Number</th><td>•••• •••• T001" in block
     assert FULL_ACCOUNT_NUMBER not in page
 
 
@@ -1024,3 +1024,198 @@ def test_admin_application_detail_labels_every_document_optional(client, student
     for name in FUNDING_DOCUMENTS:
         item = page.split(f"<span>{name}", 1)[1].split("</span></span>", 1)[0]
         assert "Optional" in item and "Required" not in item, name
+
+
+
+# =====================================================================
+# DISBURSEMENT METHOD - Bank Account OR Mobile Money
+# =====================================================================
+def save_bank(client, **overrides):
+    return client.post("/application/step/bank", data={**TEST_BANK_DETAILS, **overrides})
+
+
+def save_mobile(client, **overrides):
+    return client.post("/application/step/bank", data={**TEST_MOBILE_MONEY_DETAILS, **overrides})
+
+
+def confirm_bank(client):
+    return client.post("/application/step/bank", data={"action": "confirm", "confirm_accurate": "yes"})
+
+
+def test_form_offers_the_method_choice_and_only_the_kept_fields(client, drafter):
+    to_bank(client)
+    page = html(client, "/application/step/bank")
+    assert "How would you like to receive funding? <span class=\"text-danger\">*</span>" in page
+    for value, label in (("bank", "Bank Account"), ("mobile_money", "Mobile Money")):
+        tag = page.split(f'id="method_{value}"', 1)[1].split(">", 1)[0]
+        assert f'value="{value}"' in tag and "required" in tag and "checked" not in tag   # nothing pre-chosen
+        assert f'for="method_{value}">{label}<' in page
+    provider = page.split('name="mobile_money_provider"', 1)[1].split("</select>", 1)[0]
+    for p in ("M-PESA", "Airtel Money", "Other"):
+        assert f'value="{p}"' in provider, p
+    # Both sections start hidden, so no hidden field is browser-required.
+    assert 'id="bankFields" class="d-none"' in page
+    assert 'id="mobileMoneyFields" class="border rounded p-3 mb-3 d-none"' in page
+    for name in ("country", "account_holder_name", "account_number", "mobile_money_provider", "mobile_money_number"):
+        tag = page.split(f'name="{name}"', 1)[1].split(">", 1)[0]
+        assert "required" not in tag.replace("data-method-required", ""), name
+    # Removed fields stay absent.
+    for name in REMOVED_BANK_FIELDS:
+        assert f'name="{name}"' not in page, name
+    for label in ("Branch", "Bank Code", "SWIFT", "IBAN", "Routing Number"):
+        assert label not in page, label
+
+
+def test_neither_method_selected_is_blocked(client, drafter):
+    to_bank(client)
+    for data in ({k: v for k, v in TEST_BANK_DETAILS.items() if k != "payment_method"},
+                 {**TEST_BANK_DETAILS, "payment_method": "cheque"}):
+        r = client.post("/application/step/bank", data=data)
+        assert r.headers["Location"].endswith("/application/step/bank")
+        assert "Please choose how you would like to receive funding" in flashes(client)
+        assert bank_row(drafter["application_id"]) is None
+
+
+@pytest.mark.parametrize("field,label", [("country", "Country"), ("manual_bank_name", "Bank Name"),
+                                         ("account_holder_name", "Account Holder Name"),
+                                         ("account_number", "Account Number")])
+def test_bank_account_requires_its_fields(client, drafter, field, label):
+    to_bank(client)
+    save_bank(client, **{field: ""}, mobile_money_provider="M-PESA", mobile_money_number="0712345645")
+    assert label in flashes(client)
+    assert bank_row(drafter["application_id"]) is None            # mobile money never stands in for the bank
+
+
+def test_bank_account_does_not_require_mobile_money_or_account_type(client, drafter):
+    to_bank(client)
+    data = {k: v for k, v in TEST_BANK_DETAILS.items() if k != "account_type"}
+    client.post("/application/step/bank", data=data)
+    confirm_bank(client)
+    row = bank_row(drafter["application_id"])
+    assert row["payment_method"] == "bank" and row["confirmed"] == 1
+    assert row["mobile_money_provider"] is None and row["mobile_money_number"] is None
+    assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
+
+
+def test_mobile_money_saves_without_any_bank_fields(client, drafter):
+    to_bank(client)
+    r = save_mobile(client)
+    assert r.headers["Location"].endswith("/application/step/bank")
+    confirm_bank(client)
+    row = bank_row(drafter["application_id"])
+    assert row["payment_method"] == "mobile_money" and row["confirmed"] == 1
+    assert (row["mobile_money_provider"], row["mobile_money_number"]) == ("M-PESA", "0712 345 645")
+    assert row["country"] == "" and row["account_number"] == ""     # no bank details asked for
+    assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
+    assert client.post("/application/step/review", data={}).headers["Location"].endswith("/application/step/visa")
+
+
+@pytest.mark.parametrize("overrides,label", [
+    ({"mobile_money_provider": ""}, "Mobile Money Provider"),
+    ({"mobile_money_provider": "Some Bank"}, "Mobile Money Provider"),
+    ({"mobile_money_number": ""}, "Mobile Money Number"),
+    ({"mobile_money_number": "12ab"}, "Mobile Money Number"),
+])
+def test_mobile_money_requires_provider_and_valid_number(client, drafter, overrides, label):
+    to_bank(client)
+    save_mobile(client, **overrides)
+    assert label in flashes(client)
+    assert bank_row(drafter["application_id"]) is None
+
+
+@pytest.mark.parametrize("provider", ["M-PESA", "Airtel Money", "Other"])
+def test_each_mobile_money_provider_is_accepted(client, drafter, provider):
+    to_bank(client)
+    save_mobile(client, mobile_money_provider=provider)
+    assert bank_row(drafter["application_id"])["mobile_money_provider"] == provider
+
+
+def test_review_and_dashboard_show_mobile_money_masked(client, drafter):
+    to_bank(client)
+    save_mobile(client)
+    confirm_bank(client)
+    for url in ("/application/step/review", "/dashboard", "/application/step/bank"):
+        page = html(client, url)
+        assert "Mobile Money" in page and "M-PESA" in page, url
+        assert "07******45" in page, url
+        assert "0712 345 645" not in page and "0712345645" not in page, url     # never the full number
+    block = html(client, "/application/step/review").split('id="reviewDisbursement"', 1)[1].split("</table>", 1)[0]
+    assert "Disbursement Method</th><td>Mobile Money" in block
+    assert "Provider</th><td>M-PESA" in block and "Mobile Number</th><td>07******45" in block
+    assert "Bank<" not in block and "Account Number" not in block
+
+
+def test_switching_methods_keeps_the_other_details(client, drafter):
+    to_bank(client)
+    save_bank(client)
+    confirm_bank(client)
+    # Bank -> Mobile Money: bank details are kept in the database, not wiped.
+    client.post("/application/step/bank", data={"action": "edit"})
+    page = html(client, "/application/step/bank?edit=1")
+    assert 'id="method_bank" value="bank" checked' in page and 'id="bankFields" class=""' in page
+    save_mobile(client)
+    confirm_bank(client)
+    row = bank_row(drafter["application_id"])
+    assert row["payment_method"] == "mobile_money"
+    assert (row["bank_name"], row["account_number"]) == ("Example Bank", FULL_ACCOUNT_NUMBER)
+    assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
+    # Mobile Money -> Bank: the edit form shows the saved bank details again
+    # (account number left blank keeps the stored one) and mobile money is kept.
+    client.post("/application/step/bank", data={"action": "edit"})
+    page = html(client, "/application/step/bank?edit=1")
+    assert 'id="method_mobile_money" value="mobile_money" checked' in page
+    assert 'value="Alex Testperson"' in page and "Leave blank to keep" in page
+    save_bank(client, account_number="")
+    confirm_bank(client)
+    row = bank_row(drafter["application_id"])
+    assert row["payment_method"] == "bank" and row["account_number"] == FULL_ACCOUNT_NUMBER
+    assert row["mobile_money_number"] == "0712 345 645"
+    assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
+
+
+def test_switching_to_mobile_money_from_a_fresh_form_needs_no_bank_data(client, drafter):
+    to_bank(client)
+    save_bank(client, manual_bank_name="")                          # bank attempt incomplete -> blocked
+    assert bank_row(drafter["application_id"]) is None
+    save_mobile(client)                                             # switch: mobile money alone is enough
+    confirm_bank(client)
+    assert bank_row(drafter["application_id"])["payment_method"] == "mobile_money"
+
+
+def test_existing_bank_rows_without_a_method_still_load_and_review(client, drafter):
+    to_bank(client)
+    save_bank(client)
+    confirm_bank(client)
+    # A row saved before the method existed (NULL), even with old optional mobile money.
+    execute("UPDATE student_bank_details SET payment_method = NULL, mobile_money_provider = 'M-Pesa', "
+            "mobile_money_number = '+254 700 000 009' WHERE application_id = ?", (drafter["application_id"],))
+    for url in ("/application/step/bank", "/application/step/review", "/dashboard"):
+        r = client.get(url)
+        assert r.status_code == 200, url
+        page = " ".join(r.get_data(as_text=True).split())
+        assert "Bank Account" in page and "Example Bank" in page, url
+        assert FULL_ACCOUNT_NUMBER not in page and "+254 700 000 009" not in page, url
+    assert client.post("/application/step/review", data={}).headers["Location"].endswith("/application/step/visa")
+    client.post("/application/step/bank", data={"action": "edit"})
+    assert 'id="method_bank" value="bank" checked' in html(client, "/application/step/bank?edit=1")
+
+
+def test_incomplete_mobile_money_row_cannot_pass_review(client, drafter):
+    to_bank(client)
+    save_mobile(client)
+    confirm_bank(client)
+    execute("UPDATE student_bank_details SET mobile_money_number = '' WHERE application_id = ?",
+            (drafter["application_id"],))
+    r = client.post("/application/step/review", data={})
+    assert r.headers["Location"].endswith("/application/step/bank?edit=1")
+    assert "Mobile Money Number" in flashes(client)
+
+
+def test_mobile_money_masking_unit():
+    import banks_lib
+    assert banks_lib.mask_mobile_number("0712345645") == "07******45"
+    assert banks_lib.mask_mobile_number("+254 712 345 645") == "25********45"
+    assert banks_lib.mask_mobile_number(None) == "—"
+    assert banks_lib.is_valid_mobile_number("0712 345 645")
+    assert not banks_lib.is_valid_mobile_number("0712")
+    assert banks_lib.disbursement_method(None) is None
