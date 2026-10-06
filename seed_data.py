@@ -468,11 +468,13 @@ def seed():
             tuple(values.values()),
         ).lastrowid
 
-        for doc_type, required in DOCUMENT_CHECKLIST:
+        # The flag above only says which demo documents start out uploaded.
+        # Every Step 7 funding document is optional (is_required = 0).
+        for doc_type, seeded_as_uploaded in DOCUMENT_CHECKLIST:
             status = "Verified" if financial_need_docs_done >= 2 else ("Uploaded" if financial_need_docs_done == 1 else "Missing")
             db.execute(
                 "INSERT INTO documents (application_id, document_type, is_required, status) VALUES (?, ?, ?, ?)",
-                (app_id, doc_type, 1 if required else 0, status if required else "Missing"),
+                (app_id, doc_type, 0, status if seeded_as_uploaded else "Missing"),
             )
 
         if submitted:

@@ -386,10 +386,11 @@ DEMO_MODE = False  # Legacy demo payment is permanently disabled for manual veri
 
 # Document checklist used for every application (kept simple / hard-coded
 # for a beginner project - could later move into its own database table).
-# (document_type, is_required). Required documents must be uploaded on the
-# Documents step; optional ones are answered Yes / No / left blank, and only
-# an explicit Yes needs an upload. The required set comes from
-# database.REQUIRED_FUNDING_DOCUMENTS so the startup migration always agrees.
+# (document_type, is_required). The required set comes from
+# database.REQUIRED_FUNDING_DOCUMENTS (currently EMPTY: all nine Step 7
+# documents are optional) so the startup migration always agrees. Optional
+# documents are answered Yes / No / left blank; only an explicit Yes needs an
+# upload, and a missing or unanswered document never blocks continuing.
 _FUNDING_DOCUMENT_ORDER = [
     "Academic Transcripts", "Certificates", "Admission Letter", "Recommendation Letter",
     "Personal Statement", "CV", "Passport / Identity Document", "Proof of Financial Need",

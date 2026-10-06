@@ -149,7 +149,7 @@
 
             {% elif step_name == 'documents' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>
-              <p class="text-muted">Documents marked <span class="badge bg-danger">Required</span> must be uploaded before you can continue. Documents marked <span class="badge bg-secondary">Optional</span> are not required: upload them if you have them, select No if a document is not available, or leave them unanswered — a missing optional document never stops your application.</p>
+              <p class="text-muted" id="documentsIntro">All documents are optional. Upload any documents you have. For documents you do not have, select No or leave the question unanswered. Missing documents will not prevent you from continuing your application. If you select <strong>Yes, I have it</strong>, please upload that document.</p>
               {% if missing_documents %}
               <div class="alert alert-warning small" role="alert">
                 {% for message in missing_documents %}<div>{{ message }}</div>{% endfor %}
@@ -158,24 +158,17 @@
               <div class="row g-3" id="fundingDocumentChecklist">
               {% for d in documents %}
                 <div class="col-12">
-                  <div class="border rounded p-3" data-document-requirement="{{ 'required' if d.is_required else 'optional' }}">
+                  {# Every Step 7 document is optional: no "Required" state and no
+                     always-required upload. The file input becomes required only
+                     while "Yes, I have it" is selected. #}
+                  <div class="border rounded p-3" data-document-requirement="optional">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
                       <strong>{{ d.document_type }}</strong>
                       <span>
-                        {% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}
-                        {% if d.status != 'Missing' %}<span class="badge bg-success">Uploaded</span>{% else %}<span class="badge bg-light text-dark border">Missing</span>{% endif %}
+                        <span class="badge bg-secondary">Optional</span>
+                        {% if d.status != 'Missing' %}<span class="badge bg-success">Uploaded</span>{% endif %}
                       </span>
                     </div>
-                    {% if d.is_required %}
-                      {% if d.status == 'Missing' %}
-                        <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }} <span class="text-danger">*</span></label>
-                        <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control"
-                               accept=".pdf,.jpg,.jpeg,.png" required>
-                        <div class="form-text">This document is required.</div>
-                      {% else %}
-                        <div class="small text-muted">Uploaded {{ d.uploaded_at or '' }}</div>
-                      {% endif %}
-                    {% else %}
                     <div class="form-label fw-semibold">Do you have this document?</div>
                     <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
                       <div class="form-check">
@@ -202,7 +195,6 @@
                     <div class="alert alert-light border small mt-2 mb-0 not-available-message {{ '' if d.availability == 'No' else 'd-none' }}">
                       <strong>Not available</strong> — you selected No. You can continue without uploading this document.
                     </div>
-                    {% endif %}
                   </div>
                 </div>
               {% endfor %}
@@ -307,10 +299,10 @@
                 {% for d in documents %}
                 <tr>
                   <td>{{ d.document_type }}</td>
-                  <td>{% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}</td>
+                  <td><span class="badge bg-secondary">Optional</span></td>
                   <td>
                     {% if d.status != 'Missing' %}<span class="badge bg-success">Uploaded</span>
-                    {% elif d.is_required or d.availability == 'Yes' %}<span class="badge bg-warning text-dark">⚠ Missing — please upload</span>
+                    {% elif d.availability == 'Yes' %}<span class="badge bg-warning text-dark">⚠ Missing — please upload</span>
                     {% else %}<span class="text-muted small">Missing{% if d.availability == 'No' %} (not available){% endif %}</span>
                     {% endif %}
                   </td>
@@ -318,7 +310,7 @@
                 {% endfor %}
                 </tbody>
               </table>
-              <p class="small text-muted">A missing optional document does not stop your application.</p>
+              <p class="small text-muted">All documents are optional — a missing document does not stop your application.</p>
               <div class="form-check mb-3">
                 <input class="form-check-input" type="checkbox" required id="confirm">
                 <label class="form-check-label" for="confirm">I confirm that the information provided is accurate and complete.</label>

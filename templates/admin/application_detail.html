@@ -148,8 +148,8 @@
             {% for d in documents %}
             <li class="list-group-item d-flex justify-content-between align-items-center">
               <span>{{ d.document_type }}
-                {% if d.is_required %}<span class="badge bg-danger ms-1">Required</span>{% else %}<span class="badge bg-secondary ms-1">Optional</span>{% endif %}</span>
-              <span class="badge {{ 'bg-success' if d.status == 'Verified' else 'bg-primary' if d.status == 'Uploaded' else 'bg-light text-dark border' if not d.is_required else 'bg-warning text-dark' }}">{{ d.status }}</span>
+                <span class="badge bg-secondary ms-1">Optional</span></span>
+              <span class="badge {{ 'bg-success' if d.status == 'Verified' else 'bg-primary' if d.status == 'Uploaded' else 'bg-light text-dark border' }}">{{ d.status }}</span>
               {% if d.status == 'Uploaded' %}
               <form method="POST" action="{{ url_for('admin_verify_document', application_id=application.id, document_id=d.id) }}">
                 <button class="btn btn-sm btn-outline-success">Verify</button>

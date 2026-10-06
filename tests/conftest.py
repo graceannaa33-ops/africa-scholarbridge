@@ -103,8 +103,9 @@ def complete_steps_before_visa(client):
         "estimated_financial_need": "USD 3,000 / year", "funding_already_received": ""})
     client.post("/application/step/preferences", data={"preferences": ["International Study", "Scholarship"]})
     client.post("/application/step/statement", data={"personal_statement": "I want to study computer science."})
-    # Required funding documents are uploaded (fictional PDF bytes) through
-    # the real Documents step; optional documents are explicitly marked No.
+    # Documents step through the real form: every Step 7 document is optional,
+    # so each is explicitly marked No (any document flagged required would get
+    # a fictional PDF upload instead).
     db = get_db()
     app_row = db.execute("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1").fetchone()
     db.close()
@@ -123,9 +124,10 @@ COMPLETE_EDUCATION = {"institution": "Example University", "education_level": "U
 
 
 def funding_documents_payload(application_id, optional="no"):
-    """Form data for the Documents step: a fictional PDF for every REQUIRED
-    funding document, and `optional` ('no', 'yes' or None = leave blank)
-    for every optional one."""
+    """Form data for the Documents step: `optional` ('no', 'yes' or None =
+    leave blank) for every optional document - currently all nine - and a
+    fictional PDF for any document flagged required (none under the current
+    policy)."""
     db = get_db()
     rows = db.execute("SELECT id, is_required FROM documents WHERE application_id = ?", (application_id,)).fetchall()
     db.close()

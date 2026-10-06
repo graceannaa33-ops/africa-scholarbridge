@@ -18,12 +18,12 @@ import os
 DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "database", "scholarbridge.db")
 
-# The ONE list of funding documents that are REQUIRED. app.py builds its
-# DOCUMENT_CHECKLIST from it and init_db() migrates existing rows to it, so
-# the two can never disagree. Every other funding document is optional.
-REQUIRED_FUNDING_DOCUMENTS = (
-    "Academic Transcripts", "Certificates", "Recommendation Letter", "Personal Statement", "CV",
-)
+# The ONE list of Step 7 funding documents that are REQUIRED. app.py builds
+# its DOCUMENT_CHECKLIST from it and init_db() migrates existing rows to it,
+# so the two can never disagree. Current policy: ALL nine Step 7 documents
+# are OPTIONAL, so this is empty. (Optional = blank or No never blocks; an
+# explicit Yes still needs an upload.)
+REQUIRED_FUNDING_DOCUMENTS = ()
 
 
 def get_db():
@@ -784,17 +784,20 @@ def _init_db():
         _add_column(cur, "documents", "availability", "TEXT")
     cur.execute("UPDATE documents SET availability = 'Yes' WHERE availability IS NULL AND status IN ('Uploaded', 'Verified')")
     # Funding document requirement policy (must match DOCUMENT_CHECKLIST in
-    # app.py): these five are REQUIRED, every other funding document is
-    # OPTIONAL. Existing rows from any earlier policy are corrected here at
-    # startup. Only the is_required flag changes: uploaded files, statuses
-    # and Yes/No/blank answers are kept, and an unanswered optional item
-    # stays NULL (it is never turned into "No").
-    required_types = REQUIRED_FUNDING_DOCUMENTS
-    marks = ",".join("?" * len(required_types))
-    cur.execute(f"UPDATE documents SET is_required = 1 WHERE is_required != 1 AND document_type IN ({marks})",
-                required_types)
-    cur.execute(f"UPDATE documents SET is_required = 0 WHERE is_required != 0 AND document_type NOT IN ({marks})",
-                required_types)
+    # app.py, i.e. REQUIRED_FUNDING_DOCUMENTS - currently none). Existing rows
+    # from any earlier policy are corrected here at startup. Only the
+    # is_required flag changes: uploaded files, statuses and Yes/No/blank
+    # answers are kept, and an unanswered optional item stays NULL (it is
+    # never turned into "No").
+    required_types = tuple(REQUIRED_FUNDING_DOCUMENTS)
+    if required_types:
+        marks = ",".join("?" * len(required_types))
+        cur.execute(f"UPDATE documents SET is_required = 1 WHERE is_required != 1 AND document_type IN ({marks})",
+                    required_types)
+        cur.execute(f"UPDATE documents SET is_required = 0 WHERE is_required != 0 AND document_type NOT IN ({marks})",
+                    required_types)
+    else:
+        cur.execute("UPDATE documents SET is_required = 0 WHERE is_required != 0")
     # The removed demo "Upload" buttons (/documents and /student-visa/documents)
     # marked rows Uploaded with a made-up path and NO file. Those rows are
     # reset to Missing so a fake upload never counts as a real one. Only the

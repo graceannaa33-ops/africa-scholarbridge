@@ -43,29 +43,25 @@ def _funding_payload(rows, optional="no", files=None):
     return payload
 
 
-REQUIRED_FUNDING = {"Academic Transcripts", "Certificates", "Recommendation Letter", "Personal Statement", "CV"}
-
-
-def test_funding_document_requirements_are_five_required_four_optional(client, student):
+def test_all_funding_documents_are_optional(client, student):
     app, rows = _funding_docs(student["student_id"])
     assert len(rows) == 9
-    assert {row["document_type"] for row in rows if row["is_required"]} == REQUIRED_FUNDING
-    # The fixture uploaded the required documents, so optional ones may be left blank.
+    assert all(not row["is_required"] for row in rows)
     response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/application/step/bank")
 
 
-def test_missing_required_funding_document_cannot_continue(client, student):
+def test_no_uploaded_funding_documents_can_continue(client, student):
     app, rows = _funding_docs(student["student_id"])
-    required = next(r for r in rows if r["is_required"])
     db = get_db()
-    db.execute("UPDATE documents SET status='Missing', file_path=NULL WHERE id=?", (required["id"],))
+    db.execute("UPDATE documents SET status='Missing', file_path=NULL, availability=NULL WHERE application_id=?",
+               (app["id"],))
     db.commit()
     db.close()
     response = client.post("/application/step/documents", data={})
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/application/step/documents")
+    assert response.headers["Location"].endswith("/application/step/bank")
 
 
 def test_funding_document_selected_yes_without_upload_cannot_continue(client, student):
