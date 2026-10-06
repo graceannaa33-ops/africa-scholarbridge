@@ -564,6 +564,63 @@ def visa_admin_required(f):
     return wrapper
 
 
+# ---------------------------------------------------------------------
+# Separate admin host (opt-in). The admin system stays in this same app and
+# keeps its own logins (/admin/login for the Main Admin, /visa-admin/login for
+# the separate Visa Admin) - nothing here grants access to anything.
+#
+#   ADMIN_HOST   e.g. admin.africascholarbridge.co.ke
+#   PUBLIC_HOST  e.g. africascholarbridge.co.ke   (where student pages live)
+#
+# When ADMIN_HOST is set:
+#   * /admin/* and /visa-admin/* answer ONLY on ADMIN_HOST; on every other
+#     host (the public domain, *.onrender.com) they are a plain 404, so the
+#     public website does not reveal the admin system at all.
+#   * On ADMIN_HOST, "/" goes to the admin area (-> login if not signed in)
+#     and student/public pages are sent to PUBLIC_HOST (or 404 if unset).
+# When ADMIN_HOST is NOT set, nothing changes (safe default: deploying this
+# code can never lock anyone out before the subdomain's DNS is working).
+# Session cookies are host-only (no SESSION_COOKIE_DOMAIN), so a login on
+# the admin host is never sent to the public site, and vice versa.
+# ---------------------------------------------------------------------
+ADMIN_HOST = os.environ.get("ADMIN_HOST", "").strip().lower() or None
+PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "").strip().lower() or None
+
+
+def _is_admin_path(path):
+    return (path in ("/admin", "/visa-admin") or path.startswith("/admin/")
+            or path.startswith("/visa-admin/"))
+
+
+@app.before_request
+def _separate_admin_host():
+    if not ADMIN_HOST:
+        return None
+    host = (request.host or "").split(":", 1)[0].strip().lower()
+    admin_path = _is_admin_path(request.path)
+    if host == ADMIN_HOST:
+        if admin_path or request.path.startswith("/static/"):
+            return None
+        if request.path == "/":
+            return redirect(url_for("admin_dashboard"))
+        if PUBLIC_HOST:
+            query = ("?" + request.query_string.decode("utf-8", "ignore")) if request.query_string else ""
+            return redirect(f"https://{PUBLIC_HOST}{request.path}{query}")
+        abort(404)
+    if admin_path:
+        abort(404)
+    return None
+
+
+@app.after_request
+def _no_index_admin_pages(response):
+    # Ask search engines never to index admin pages (they still require login).
+    # Deliberately NOT listed in robots.txt, which would advertise the paths.
+    if _is_admin_path(request.path):
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
 def generate_reference_number(db, year):
     """Format: ASB-[YEAR]-[6 DIGIT NUMBER], guaranteed unique."""
     while True:

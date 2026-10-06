@@ -25,6 +25,15 @@ services:
         value: "0"
       - key: SECRET_KEY
         generateValue: true
+      # Separate admin subdomain (OPTIONAL - set these in the Render dashboard
+      # only AFTER admin.africascholarbridge.co.ke is added as a Custom Domain
+      # on this service, its DNS CNAME points here and Render shows the
+      # certificate as issued). Once set, /admin and /visa-admin answer only
+      # on ADMIN_HOST and return 404 on the public website.
+      # - key: ADMIN_HOST
+      #   value: admin.africascholarbridge.co.ke
+      # - key: PUBLIC_HOST
+      #   value: africascholarbridge.co.ke
     disk:
       name: scholarbridge-data
       mountPath: /var/data
