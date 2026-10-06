@@ -269,7 +269,7 @@
                     {% if application.bank_step_status == 'COMPLETE' %}
                       <span class="badge bg-success">✓ Complete</span>
                       {% if review_bank %}
-                      <div class="small mt-1">{{ review_bank.bank_name }}{% if review_bank.branch %} · {{ review_bank.branch }}{% endif %}<br>
+                      <div class="small mt-1">{{ review_bank.bank_name }}<br>
                         {{ review_bank.account_holder_name }} · {{ review_masked_account }}</div>
                       {% endif %}
                     {% elif application.bank_step_status == 'NOT_REQUIRED' %}

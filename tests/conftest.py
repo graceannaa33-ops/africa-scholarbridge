@@ -76,8 +76,10 @@ def student(client):
 TEST_BANK_DETAILS = {
     "action": "save_details", "country": "Kenya", "manual_bank_name": "Example Bank",
     "account_holder_name": "Alex Testperson", "account_number": "TEST-ACCOUNT-001", "account_type": "Savings",
-    "branch": "Example Branch", "bank_code": "TEST-BANK-001", "swift_bic": "", "iban": "",
 }
+# Fields no longer asked for on the bank step (columns kept in the database).
+REMOVED_BANK_FIELDS = {"branch": "Example Branch", "bank_code": "TEST-BANK-001", "swift_bic": "TESTSWIFTXXX",
+                       "iban": "TEST-IBAN-001", "routing_number": "000000000"}
 
 
 def complete_bank_step(client, **overrides):

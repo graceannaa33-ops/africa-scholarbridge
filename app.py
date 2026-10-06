@@ -1483,14 +1483,12 @@ def _bank_details_missing(details):
     NOT considered here: it is optional extra information and never
     substitutes for the bank account itself."""
     if not details:
-        return ["Bank Name", "Account Holder Name", "Account Number", "Branch", "Bank Code"]
+        return ["Bank Name", "Account Holder Name", "Account Number"]
     bank_name = (details["bank_name"] or "").strip()
     return [label for ok, label in (
         (bank_name and bank_name != "Not specified", "Bank Name"),
         ((details["account_holder_name"] or "").strip(), "Account Holder Name"),
         ((details["account_number"] or "").strip(), "Account Number"),
-        ((details["branch"] or "").strip(), "Branch"),
-        ((details["bank_code"] or "").strip(), "Bank Code"),
     ) if not ok]
 
 
@@ -1795,11 +1793,9 @@ def application_step(step_name):
                 account_holder_name = request.form.get("account_holder_name", "").strip()
                 account_number = request.form.get("account_number", "").strip()
                 account_type = request.form.get("account_type", "Savings")
-                branch = request.form.get("branch", "").strip()
-                bank_code = request.form.get("bank_code", "").strip()
-                swift_bic = request.form.get("swift_bic", "").strip()
-                iban = request.form.get("iban", "").strip()
-                routing_number = request.form.get("routing_number", "").strip()
+                # Branch, Bank Code, SWIFT/BIC, IBAN and Routing Number are no
+                # longer asked for. Their columns stay in student_bank_details
+                # for backward compatibility; values saved before are kept.
                 mobile_money_provider = request.form.get("mobile_money_provider", "").strip()
                 mobile_money_number = request.form.get("mobile_money_number", "").strip()
 
@@ -1815,18 +1811,16 @@ def application_step(step_name):
                         "SELECT * FROM banks WHERE id = ? AND country = ? AND is_active = 1", (bank_id, country)
                     ).fetchone()
 
-                # Required for disbursement: bank name (from the directory or
-                # typed), account holder, account number (an edit may leave it
-                # blank to keep the stored one), branch and bank code (the
-                # directory's code counts). SWIFT/BIC, IBAN, routing number and
-                # mobile money stay optional. No format rules beyond presence,
-                # so legitimate international formats are never rejected.
+                # Required for disbursement: country (checked above), bank name
+                # (from the directory or typed), account holder and account
+                # number (an edit may leave it blank to keep the stored one).
+                # Account type and mobile money are optional. No format rules
+                # beyond presence, so legitimate international formats are
+                # never rejected.
                 missing = [label for ok, label in (
                     (bank_row or manual_bank_name, "Bank Name"),
                     (account_holder_name, "Account Holder Name"),
                     (account_number or (existing_details and existing_details["account_number"]), "Account Number"),
-                    (branch, "Branch"),
-                    (bank_code or (bank_row and bank_row["bank_code"]), "Bank Code"),
                 ) if not ok]
                 if missing:
                     flash("Please fill in: " + ", ".join(missing) + ".", "danger")
@@ -1846,16 +1840,13 @@ def application_step(step_name):
                     db.execute(
                         """UPDATE student_bank_details
                            SET country = ?, bank_id = ?, bank_name = ?, account_holder_name = ?,
-                               account_number = ?, account_type = ?, branch = ?, bank_code = ?,
-                               swift_bic = ?, iban = ?, routing_number = ?, currency = ?,
+                               account_number = ?, account_type = ?, currency = ?,
                                mobile_money_provider = ?, mobile_money_number = ?,
                                verification_status = ?, confirmed = 0, updated_at = CURRENT_TIMESTAMP
                            WHERE application_id = ?""",
                         (country, bank_row["id"] if bank_row else None, bank_name_final or "Not specified",
                          account_holder_name or existing_details["account_holder_name"], kept_account_number,
-                         account_type, branch or None, bank_code or (bank_row["bank_code"] if bank_row else None),
-                         swift_bic or (bank_row["swift_bic"] if bank_row else None), iban or None,
-                         routing_number or None, banks_lib.currency_for_country(country),
+                         account_type, banks_lib.currency_for_country(country),
                          mobile_money_provider or None, mobile_money_number or None,
                          verification_status, application["id"]),
                     )
@@ -1863,14 +1854,12 @@ def application_step(step_name):
                     db.execute(
                         """INSERT INTO student_bank_details
                            (student_id, application_id, country, bank_id, bank_name, account_holder_name,
-                            account_number, account_type, branch, bank_code, swift_bic, iban, routing_number,
+                            account_number, account_type,
                             currency, mobile_money_provider, mobile_money_number, verification_status, confirmed)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)""",
                         (student["id"], application["id"], country, bank_row["id"] if bank_row else None,
                          bank_name_final or "Not specified", account_holder_name, account_number, account_type,
-                         branch or None, bank_code or (bank_row["bank_code"] if bank_row else None),
-                         swift_bic or (bank_row["swift_bic"] if bank_row else None), iban or None,
-                         routing_number or None, banks_lib.currency_for_country(country),
+                         banks_lib.currency_for_country(country),
                          mobile_money_provider or None, mobile_money_number or None, verification_status),
                     )
                 db.commit()

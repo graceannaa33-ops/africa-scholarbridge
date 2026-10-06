@@ -26,7 +26,8 @@ import pytest
 
 import app as app_module
 import database
-from conftest import (APPLICANT, COMPLETE_EDUCATION, PNG_BYTES, TEST_BANK_DETAILS, VISA_FORM_ANSWERS,
+from conftest import (APPLICANT, COMPLETE_EDUCATION, PNG_BYTES, REMOVED_BANK_FIELDS, TEST_BANK_DETAILS,
+                      VISA_FORM_ANSWERS,
                       choose_yes, complete_bank_step, count_applications, funding_documents_payload,
                       get_application, upload, visa_request_for, visa_requests_for)
 from database import get_db
@@ -506,7 +507,7 @@ def to_bank(client):
     return post_documents(client, required_uploads(app_id))
 
 
-@pytest.mark.parametrize("field", ["manual_bank_name", "account_holder_name", "account_number", "branch", "bank_code"])
+@pytest.mark.parametrize("field", ["manual_bank_name", "account_holder_name", "account_number"])
 def test_mobile_money_cannot_replace_a_required_bank_field(client, drafter, field):
     to_bank(client)
     data = {**TEST_BANK_DETAILS, field: "", "mobile_money_provider": "M-Pesa",
@@ -531,14 +532,13 @@ def test_mobile_money_only_cannot_complete_the_bank_step(client, drafter):
 
 def test_bank_details_with_optional_mobile_money_persist(client, drafter):
     to_bank(client)
-    complete_bank_step(client, swift_bic="TESTSWIFTXXX", iban="TEST-IBAN-001", routing_number="000000000",
-                       mobile_money_provider="M-Pesa", mobile_money_number="+254 700 000 009")
+    complete_bank_step(client, account_type="Current", mobile_money_provider="M-Pesa",
+                       mobile_money_number="+254 700 000 009")
     row = bank_row(drafter["application_id"])
     assert row["confirmed"] == 1
-    assert (row["bank_name"], row["account_holder_name"], row["account_number"], row["branch"], row["bank_code"]) == (
-        "Example Bank", "Alex Testperson", FULL_ACCOUNT_NUMBER, "Example Branch", "TEST-BANK-001")
-    assert (row["swift_bic"], row["iban"], row["routing_number"]) == ("TESTSWIFTXXX", "TEST-IBAN-001", "000000000")
-    assert row["mobile_money_provider"] == "M-Pesa"
+    assert (row["country"], row["bank_name"], row["account_holder_name"], row["account_number"], row["account_type"]) == (
+        "Kenya", "Example Bank", "Alex Testperson", FULL_ACCOUNT_NUMBER, "Current")
+    assert (row["mobile_money_provider"], row["mobile_money_number"]) == ("M-Pesa", "+254 700 000 009")
     assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
     page = html(client, "/application/step/bank")
     assert FULL_ACCOUNT_NUMBER not in page
@@ -553,16 +553,19 @@ def test_edit_reopens_a_prefilled_form_without_the_account_number(client, drafte
     assert get_application(drafter["student_id"])["bank_step_status"] == "ACTION_REQUIRED"
     page = html(client, "/application/step/bank?edit=1")
     assert 'id="bankDetailsForm"' in page                              # the form, not the confirm screen
-    assert 'value="Alex Testperson"' in page and 'value="Example Branch"' in page
-    assert 'value="TEST-BANK-001"' in page and 'value="Example Bank"' in page
+    assert 'value="Alex Testperson"' in page and 'value="Example Bank"' in page
     assert FULL_ACCOUNT_NUMBER not in page                             # never echoed back
     assert "Leave blank to keep" in page
+    for name in REMOVED_BANK_FIELDS:                                   # not requested when editing either
+        assert f'name="{name}"' not in page, name
 
-    # Change only the branch: blank account number keeps the stored one.
-    client.post("/application/step/bank", data={**TEST_BANK_DETAILS, "account_number": "", "branch": "New Branch"})
+    # Change only the holder name: blank account number keeps the stored one.
+    client.post("/application/step/bank", data={**TEST_BANK_DETAILS, "account_number": "",
+                                                 "account_holder_name": "Alex T. Testperson"})
     client.post("/application/step/bank", data={"action": "confirm", "confirm_accurate": "yes"})
     row = bank_row(drafter["application_id"])
-    assert row["branch"] == "New Branch" and row["account_number"] == FULL_ACCOUNT_NUMBER and row["confirmed"] == 1
+    assert row["account_holder_name"] == "Alex T. Testperson"
+    assert row["account_number"] == FULL_ACCOUNT_NUMBER and row["confirmed"] == 1
     assert get_application(drafter["student_id"])["bank_step_status"] == "COMPLETE"
 
 
@@ -577,11 +580,11 @@ def test_edit_url_cannot_show_the_form_for_confirmed_details(client, drafter):
 def test_older_incomplete_bank_row_cannot_pass_review_or_be_confirmed(client, drafter):
     to_bank(client)
     complete_bank_step(client)
-    execute("UPDATE student_bank_details SET branch = NULL, bank_code = NULL WHERE application_id = ?",
+    execute("UPDATE student_bank_details SET account_holder_name = '' WHERE application_id = ?",
             (drafter["application_id"],))
     r = client.post("/application/step/review", data={})
     assert r.headers["Location"].endswith("/application/step/bank?edit=1")
-    assert "Branch, Bank Code" in flashes(client)
+    assert "Account Holder Name" in flashes(client)
     app_row = get_application(drafter["student_id"])
     assert app_row["bank_step_status"] == "ACTION_REQUIRED"
     assert bank_row(drafter["application_id"])["account_number"] == FULL_ACCOUNT_NUMBER   # row kept
@@ -589,6 +592,26 @@ def test_older_incomplete_bank_row_cannot_pass_review_or_be_confirmed(client, dr
     r = client.post("/application/step/bank", data={"action": "confirm", "confirm_accurate": "yes"})
     assert r.headers["Location"].endswith("/application/step/bank?edit=1")
     assert get_application(drafter["student_id"])["bank_step_status"] == "ACTION_REQUIRED"
+
+
+def test_old_rows_with_branch_and_codes_keep_them_but_never_display_or_require_them(client, drafter):
+    to_bank(client)
+    complete_bank_step(client)
+    # A row saved before the change still holds these values (columns kept for compatibility).
+    execute("UPDATE student_bank_details SET branch = 'Old Branch', bank_code = 'OLD-CODE', swift_bic = 'OLDSWIFT', "
+            "iban = 'OLD-IBAN', routing_number = '111' WHERE application_id = ?", (drafter["application_id"],))
+    for url in ("/application/step/bank", "/application/step/review"):
+        page = html(client, url)
+        for value in ("Old Branch", "OLD-CODE", "OLDSWIFT", "OLD-IBAN"):
+            assert value not in page, (url, value)
+    # Editing other details leaves the stored values untouched (nothing deleted).
+    client.post("/application/step/bank", data={"action": "edit"})
+    client.post("/application/step/bank", data={**TEST_BANK_DETAILS, "account_number": ""})
+    client.post("/application/step/bank", data={"action": "confirm", "confirm_accurate": "yes"})
+    row = bank_row(drafter["application_id"])
+    assert (row["branch"], row["bank_code"], row["swift_bic"], row["iban"], row["routing_number"]) == (
+        "Old Branch", "OLD-CODE", "OLDSWIFT", "OLD-IBAN", "111")
+    assert client.post("/application/step/review", data={}).headers["Location"].endswith("/application/step/visa")
 
 
 def test_review_shows_bank_masked_and_the_requested_summary(client, drafter):
@@ -600,7 +623,7 @@ def test_review_shows_bank_masked_and_the_requested_summary(client, drafter):
     for text in ("Alex Testperson", "Example University", "Full tuition", "KSh 75,000",
                  "Requested amount only — final funding decisions are subject to review.",
                  "KSh 75,000 per academic year", "Scholarship", "A fictional statement.",
-                 "✓ Complete", "Example Bank · Example Branch",
+                 "✓ Complete", "Example Bank",
                  "Final step — next, after this review"):
         assert text in page, text
     assert "Alex Testperson · •••• •••• T001" in page

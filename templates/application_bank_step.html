@@ -29,7 +29,6 @@
               <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
               <tr><th>Account</th><td>{{ masked_account }}</td></tr>
               <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
-              {% if existing_details.branch %}<tr><th>Branch</th><td>{{ existing_details.branch }}</td></tr>{% endif %}
               {% if existing_details.mobile_money_provider %}
               <tr><th>Mobile Money</th><td>{{ existing_details.mobile_money_provider }} — •••• {{ (existing_details.mobile_money_number or '')[-4:] }}</td></tr>
               {% endif %}
@@ -68,8 +67,6 @@
               <tr><th>Account Holder</th><td>{{ existing_details.account_holder_name }}</td></tr>
               <tr><th>Account</th><td>{{ masked_account }}</td></tr>
               <tr><th>Account Type</th><td>{{ existing_details.account_type }}</td></tr>
-              {% if existing_details.branch %}<tr><th>Branch</th><td>{{ existing_details.branch }}</td></tr>{% endif %}
-              {% if existing_details.bank_code %}<tr><th>Bank Code</th><td>{{ existing_details.bank_code }}</td></tr>{% endif %}
               {% if existing_details.mobile_money_provider %}
               <tr><th>Mobile Money <span class="text-muted small">(optional, in addition to your bank account)</span></th><td>{{ existing_details.mobile_money_provider }} — •••• {{ (existing_details.mobile_money_number or '')[-4:] }}</td></tr>
               {% endif %}
@@ -118,7 +115,7 @@
               <div class="mb-3">
                 <label class="form-label fw-semibold">Bank Name <span class="text-danger">*</span></label>
                 <div class="form-text mt-0 mb-2">Search for your bank, or tick “My bank is not listed” and type its name.</div>
-                <input type="text" id="bankSearch" class="form-control mb-2" placeholder="Search bank name, code, or SWIFT/BIC…" disabled>
+                <input type="text" id="bankSearch" class="form-control mb-2" placeholder="Search bank name…" disabled>
                 <select name="bank_id" id="bankSelect" class="form-select" data-selected="{{ ed.bank_id if ed and ed.bank_id else '' }}" disabled>
                   <option value="">Select your country first…</option>
                 </select>
@@ -150,27 +147,6 @@
                   <select name="account_type" class="form-select">
                     {% for t in account_types %}<option value="{{ t }}" {{ 'selected' if ed and ed.account_type == t }}>{{ t }}</option>{% endfor %}
                   </select>
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label">Branch <span class="text-danger">*</span></label>
-                  <input type="text" name="branch" class="form-control" placeholder="e.g. Example Branch" maxlength="120" value="{{ ed.branch or '' if ed else '' }}" required>
-                </div>
-                <div class="col-md-6" id="bankCodeField">
-                  <label class="form-label">Bank Code <span class="text-danger">*</span></label>
-                  <input type="text" name="bank_code" class="form-control" placeholder="e.g. TEST-BANK-001" maxlength="40" value="{{ ed.bank_code or '' if ed else '' }}">
-                  <div class="form-text">Filled in for you when you pick a listed bank that has one.</div>
-                </div>
-                <div class="col-md-6" id="swiftField">
-                  <label class="form-label">SWIFT / BIC <span class="text-muted small">(optional)</span></label>
-                  <input type="text" name="swift_bic" class="form-control" placeholder="e.g. TESTSWIFTXXX" maxlength="11" value="{{ ed.swift_bic or '' if ed else '' }}">
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label">IBAN <span class="text-muted small">(optional)</span></label>
-                  <input type="text" name="iban" class="form-control" placeholder="e.g. TEST-IBAN-001" maxlength="40" value="{{ ed.iban or '' if ed else '' }}">
-                </div>
-                <div class="col-md-6">
-                  <label class="form-label">Routing Number <span class="text-muted small">(if applicable)</span></label>
-                  <input type="text" name="routing_number" class="form-control" placeholder="e.g. 000000000" value="{{ ed.routing_number or '' if ed else '' }}">
                 </div>
               </div>
 
@@ -205,8 +181,6 @@
                 var bankSearch = document.getElementById('bankSearch');
                 var notListed = document.getElementById('bankNotListed');
                 var manualBankName = document.getElementById('manualBankName');
-                var bankCodeField = document.getElementById('bankCodeField');
-                var swiftField = document.getElementById('swiftField');
                 var allBanks = [];
 
                 function renderBanks(banks) {
@@ -225,7 +199,7 @@
                   banks.forEach(function (b) {
                     var opt = document.createElement('option');
                     opt.value = b.id;
-                    opt.textContent = b.bank_name + (b.bank_code ? ' (' + b.bank_code + ')' : '');
+                    opt.textContent = b.bank_name;
                     bankSelect.appendChild(opt);
                   });
                 }
@@ -244,8 +218,6 @@
                       }
                       bankSelect.disabled = notListed.checked;
                       bankSearch.disabled = false;
-                      bankCodeField.style.display = 'block';
-                      swiftField.style.display = 'block';
                     })
                     .catch(function () { renderBanks([]); });
                 }
@@ -263,9 +235,7 @@
                 bankSearch.addEventListener('input', function () {
                   var q = bankSearch.value.toLowerCase();
                   var filtered = allBanks.filter(function (b) {
-                    return (b.bank_name || '').toLowerCase().indexOf(q) !== -1 ||
-                           (b.bank_code || '').toLowerCase().indexOf(q) !== -1 ||
-                           (b.swift_bic || '').toLowerCase().indexOf(q) !== -1;
+                    return (b.bank_name || '').toLowerCase().indexOf(q) !== -1;
                   });
                   renderBanks(filtered);
                 });

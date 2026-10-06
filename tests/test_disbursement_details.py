@@ -11,8 +11,8 @@ import uuid
 import pytest
 
 import app as app_module
-from conftest import (COMPLETE_EDUCATION, TEST_BANK_DETAILS, complete_bank_step, funding_documents_payload,
-                      get_application)
+from conftest import (COMPLETE_EDUCATION, REMOVED_BANK_FIELDS, TEST_BANK_DETAILS, complete_bank_step,
+                      funding_documents_payload, get_application)
 from database import get_db
 
 
@@ -127,9 +127,13 @@ def test_bank_section_appears_after_amount_even_with_no_matching_opportunities(c
         assert ("Provide the account details that could be used for funding disbursement if your application is "
                 "approved. Providing bank details does not guarantee funding approval.") in html
         assert "Requested Funding Amount: <strong>KSh 75,000</strong>" in html
-        for ph in ("e.g. Example Bank", "e.g. Alex Testperson", "e.g. TEST-ACCOUNT-001", "e.g. Example Branch",
-                   "e.g. TEST-BANK-001", "e.g. TESTSWIFTXXX", "e.g. TEST-IBAN-001"):
+        for ph in ("e.g. Example Bank", "e.g. Alex Testperson", "e.g. TEST-ACCOUNT-001"):
             assert f'placeholder="{ph}"' in html, ph
+        # Branch, Bank Code, SWIFT/BIC, IBAN and Routing Number are no longer requested.
+        for name in REMOVED_BANK_FIELDS:
+            assert f'name="{name}"' not in html, name
+        for label in ("Branch", "Bank Code", "SWIFT", "IBAN", "Routing Number"):
+            assert label not in html, label
         assert get_application(applicant["student_id"])["bank_step_status"] == "ACTION_REQUIRED"
         assert client.post("/application/step/review", data={}).headers["Location"].endswith("/application/step/bank")
     finally:
@@ -143,11 +147,10 @@ def test_bank_step_title_in_progress_list(client, applicant):
 
 
 # ---------------------------------------------------------------------
-# 5. Validation: required fields, optional SWIFT/IBAN, international formats
+# 5. Validation: required fields, removed fields, international formats
 # ---------------------------------------------------------------------
 @pytest.mark.parametrize("field,label", [("manual_bank_name", "Bank Name"), ("account_holder_name", "Account Holder Name"),
-                                         ("account_number", "Account Number"), ("branch", "Branch"),
-                                         ("bank_code", "Bank Code")])
+                                         ("account_number", "Account Number")])
 def test_required_bank_fields_must_not_be_empty(client, applicant, field, label):
     financial(client, "75000")
     to_bank_step(client)
@@ -156,14 +159,22 @@ def test_required_bank_fields_must_not_be_empty(client, applicant, field, label)
     assert bank_row(applicant["student_id"]) is None
 
 
-def test_swift_and_iban_optional_and_international_formats_accepted(client, applicant):
+def test_international_account_formats_accepted_without_branch_or_codes(client, applicant):
     financial(client, "75000")
     to_bank_step(client)
-    complete_bank_step(client, account_number="TEST 0001-02/03", bank_code="TEST/BANK.001",
-                       swift_bic="", iban="")
+    complete_bank_step(client, account_number="TEST 0001-02/03")
     row = bank_row(applicant["student_id"])
     assert row and row["account_number"] == "TEST 0001-02/03" and row["confirmed"] == 1
     assert get_application(applicant["student_id"])["bank_step_status"] == "COMPLETE"
+
+
+def test_removed_bank_fields_are_neither_required_nor_stored(client, applicant):
+    financial(client, "75000")
+    to_bank_step(client)
+    complete_bank_step(client, **REMOVED_BANK_FIELDS)        # even if a crafted request sends them
+    row = bank_row(applicant["student_id"])
+    assert row["confirmed"] == 1
+    assert all(row[f] is None for f in REMOVED_BANK_FIELDS), {f: row[f] for f in REMOVED_BANK_FIELDS}
 
 
 # ---------------------------------------------------------------------
@@ -173,8 +184,7 @@ def test_full_flow_saves_bank_details_and_review_shows_requested_amount(client, 
     financial(client, "75,000")
     to_bank_step(client)
     with caplog.at_level("DEBUG"):
-        client.post("/application/step/bank", data={**TEST_BANK_DETAILS, "swift_bic": "TESTSWIFTXXX",
-                                                    "iban": "TEST-IBAN-001"})
+        client.post("/application/step/bank", data=TEST_BANK_DETAILS)
         confirm = page(client, "/application/step/bank")
         assert "Confirm Bank Account / Disbursement Information" in confirm and "KSh 75,000" in confirm
         assert "TEST-ACCOUNT-001" not in confirm                          # masked on the confirmation screen
@@ -182,10 +192,9 @@ def test_full_flow_saves_bank_details_and_review_shows_requested_amount(client, 
     row = bank_row(applicant["student_id"])
     app_row = get_application(applicant["student_id"])
     assert row["application_id"] == app_row["id"] and app_row["requested_amount_ksh"] == 75000
-    assert (row["bank_name"], row["account_holder_name"], row["account_number"], row["branch"], row["bank_code"],
-            row["swift_bic"], row["iban"], row["confirmed"]) == (
-        "Example Bank", "Alex Testperson", "TEST-ACCOUNT-001", "Example Branch", "TEST-BANK-001",
-        "TESTSWIFTXXX", "TEST-IBAN-001", 1)
+    assert (row["country"], row["bank_name"], row["account_holder_name"], row["account_number"],
+            row["account_type"], row["confirmed"]) == (
+        "Kenya", "Example Bank", "Alex Testperson", "TEST-ACCOUNT-001", "Savings", 1)
     assert app_row["bank_step_status"] == "COMPLETE"
     assert "TEST-ACCOUNT-001" not in caplog.text                         # never logged
     assert "TEST-ACCOUNT-001" not in (r.headers.get("Location") or "")  # never in a URL
@@ -195,7 +204,8 @@ def test_full_flow_saves_bank_details_and_review_shows_requested_amount(client, 
     assert "Requested amount only — final funding decisions are subject to review." in review
     assert "approved" not in review.split("Requested Funding Amount")[1].split("</tr>")[0].lower().replace(
         "not approved", "")
-    assert "Example Bank" in review and "Example Branch" in review and "Alex Testperson" in review
+    assert "Example Bank" in review and "Alex Testperson" in review
+    assert "Branch" not in review.split('id="reviewBankDetails"', 1)[1].split("</td>", 1)[0]
     assert "TEST-ACCOUNT-001" not in review                               # masked on Review
     assert "TEST-ACCOUNT-001" not in page(client, "/dashboard")
     r = client.post("/application/step/review", data={})
