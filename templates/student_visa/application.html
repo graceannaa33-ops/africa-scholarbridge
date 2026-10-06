@@ -79,7 +79,7 @@
 
           {% if step_name == 'documents' %}
             <h4 class="fw-bold mb-2">10. Documents Checklist</h4>
-            <p class="text-muted small" id="requiredDocuments">Required: Passport-size Photograph and National ID. Choose Yes or No for every optional document. If you choose Yes, you must upload it. Your files are private and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
+            <p class="text-muted small" id="requiredDocuments">Required: Passport-size Photograph and National ID. Every other document is optional: choose Yes and upload it, choose No, or leave it unanswered. If you choose Yes, you must upload it. Your files are private and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
             {% if missing_documents %}
             <div class="alert alert-warning small py-2">Before continuing: {{ missing_documents|join(', ') }}</div>
             {% endif %}
@@ -324,11 +324,11 @@
             {% elif step_name == 'accommodation' %}
               <h4 class="fw-bold mb-3">7. Accommodation Information</h4>
               <div class="row g-3">
-                <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay? (optional)', v.ACCOMMODATION_TYPES) }}</div>
+                <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay?', v.ACCOMMODATION_TYPES, required=True) }}</div>
                 <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation (optional)', placeholder='Example: University of Embu Hostels / ABC Hotel / John Doe') }}</div>
                 <div class="col-12">{{ area('accommodation_address', 'Address (optional)', rows=2, placeholder='Example: Embu, Kenya') }}</div>
                 <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email (optional)', placeholder='Example: +254 7XX XXX XXX / host@example.com') }}</div>
-                <div class="col-12"><div class="form-text">These accommodation details are optional — you can continue without them.</div></div>
+                <div class="col-12"><div class="form-text">Please choose where you will stay. The name, address and phone/email are optional — you can continue without them.</div></div>
               </div>
 
             {% elif step_name == 'travel_history' %}

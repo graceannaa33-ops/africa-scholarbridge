@@ -3423,9 +3423,9 @@ def student_visa_step(request_id, step_name):
     if step_name == "documents" and request.method == "POST":
         _ensure_visa_checklist(db, request_id)
         rows = _checklist_documents(db, request_id)
-        # Rules are unchanged: required documents (Passport-size Photograph,
-        # National ID) must be uploaded; each optional document needs Yes or
-        # No; Yes needs a file. Every valid answer/upload in this submission
+        # Required documents (Passport-size Photograph, National ID) must be
+        # uploaded. Optional documents: blank stays NULL (not treated as
+        # available, never blocks), No is accepted, Yes needs a file. Every valid answer/upload in this submission
         # is committed BEFORE any problem is reported, so one missing item
         # never throws away the student's other answers and uploads.
         problems = []
@@ -3435,8 +3435,9 @@ def student_visa_step(request_id, step_name):
             else:
                 answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
                 if answer not in ("yes", "no"):
-                    # Blank is never treated as available; the stored answer is left as it was.
-                    problems.append((f'Please choose Yes or No for "{row["document_type"]}".', "warning"))
+                    # Unanswered optional document: stored as NULL - never
+                    # treated as available, and never a reason to block.
+                    db.execute("UPDATE visa_documents SET availability = NULL WHERE id = ?", (row["id"],))
                     continue
             if answer == "no":
                 db.execute("UPDATE visa_documents SET availability='No' WHERE id=?", (row["id"],))

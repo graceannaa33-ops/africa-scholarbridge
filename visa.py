@@ -157,7 +157,7 @@ VISA_REQUIRED_FIELDS = {
     "visa_info": ["destination_country", "visa_category"],
     "education": ["current_status"],
     "financial": ["trip_payer"],
-    "accommodation": [],
+    "accommodation": ["accommodation_type"],   # "Where will you stay?" (name/address/contact optional)
     "travel_history": ["travelled_before", "previous_application"],
     "legal": ["overstayed", "refused_entry", "visa_refused"],
 }
@@ -255,11 +255,12 @@ def missing_required_documents(visa_request, documents):
 
 
 def missing_selected_documents(visa_request, documents):
-    """Documents that block the next step after the applicant has answered
-    every optional Yes/No question.
+    """Documents that block the next step (and the payment gate).
 
-    Required documents must always be uploaded. Optional documents only
-    become required when the applicant explicitly selects Yes.
+    Required documents must always be uploaded. An optional document blocks
+    ONLY when the applicant explicitly selected Yes and has not uploaded it.
+    Optional + unanswered (NULL) is not treated as available and never
+    blocks; optional + No never blocks.
     """
     missing = []
     for d in documents:
@@ -268,8 +269,6 @@ def missing_selected_documents(visa_request, documents):
                 missing.append(f"{d['document_type']} (required)")
         elif (d["availability"] or "").lower() == "yes" and not d["stored_file"]:
             missing.append(f"{d['document_type']} (you selected Yes)")
-        elif not d["availability"]:
-            missing.append(f"{d['document_type']} (please choose Yes or No)")
     return missing
 
 

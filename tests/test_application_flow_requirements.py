@@ -778,13 +778,51 @@ def test_optional_visa_yes_without_upload_blocks_payment_but_keeps_other_answers
     assert client.get(f"/student-visa/payment/{req}").status_code == 200
 
 
-def test_blank_optional_visa_answer_is_not_treated_as_available(client, student):
+def test_blank_optional_visa_answer_is_not_treated_as_available_and_does_not_block(client, student):
     req = visa_request_for(client, student)
     target = _visa_docs(req)["Accommodation Booking"]
     execute("UPDATE visa_documents SET availability = NULL WHERE id = ?", (target["id"],))
+    r = client.post(f"/student-visa/application/{req}/step/documents", data={})
+    assert r.headers["Location"].endswith(f"/student-visa/application/{req}/step/documents")
+    saved = _visa_docs(req)["Accommodation Booking"]
+    assert saved["availability"] is None and not saved["stored_file"]     # not treated as available
+    assert client.get(f"/student-visa/payment/{req}").status_code == 200  # ...and never blocks
+
+
+def test_all_optional_visa_documents_unanswered_still_allow_payment(client, student):
+    req = visa_request_for(client, student)
+    execute("UPDATE visa_documents SET availability = NULL WHERE request_id = ? AND is_required = 0", (req,))
     client.post(f"/student-visa/application/{req}/step/documents", data={})
-    assert _visa_docs(req)["Accommodation Booking"]["availability"] is None
+    assert client.get(f"/student-visa/payment/{req}").status_code == 200
+    page = html(client, f"/student-visa/application/{req}/step/documents")
+    assert "please choose Yes or No" not in page.lower()
+
+
+def test_required_visa_documents_still_block_even_when_optional_ones_are_blank(client, student):
+    req = visa_request_for(client, student)
+    execute("UPDATE visa_documents SET availability = NULL WHERE request_id = ? AND is_required = 0", (req,))
+    execute("UPDATE visa_documents SET stored_file = NULL, status = 'Missing' WHERE request_id = ? "
+            "AND document_type = 'National ID'", (req,))
     assert client.get(f"/student-visa/payment/{req}").status_code == 302
+
+
+def test_where_will_you_stay_is_required(client, student):
+    req = visa_request_for(client, student)
+    page = html(client, f"/student-visa/application/{req}/step/accommodation")
+    select = page.split('name="accommodation_type"', 1)[1].split("</select>", 1)[0]
+    assert select.split(">", 1)[0].rstrip().endswith("required")
+    for opt in ("Hotel", "University Accommodation", "With Family/Friend", "Rented Accommodation", "Other"):
+        assert f">{opt}</option>" in select, opt
+    assert "Where will you stay? <span class=\"text-danger\">*</span>" in page
+    assert app_module.visa_lib.VISA_REQUIRED_FIELDS["accommodation"] == ["accommodation_type"]
+    for bad in ("", "Tent on the moon"):                           # blank or tampered value
+        client.post(f"/student-visa/application/{req}/step/accommodation", data={"accommodation_type": bad})
+        assert q("SELECT accommodation_type FROM visa_requests WHERE id = ?", (req,))[0][0] is None
+        r = client.get(f"/student-visa/payment/{req}")
+        assert r.status_code == 302 and f"/student-visa/application/{req}" in r.headers["Location"], bad
+    client.post(f"/student-visa/application/{req}/step/accommodation",
+                data={"accommodation_type": "University Accommodation"})   # name/address/contact left blank
+    assert client.get(f"/student-visa/payment/{req}").status_code == 200
 
 
 def test_visa_assistance_fee_is_still_1500(client, student):
