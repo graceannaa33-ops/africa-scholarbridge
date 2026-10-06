@@ -112,12 +112,23 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_VISA_DOC_SIZE_BYTES
 # route - including M-PESA screenshot uploads - keeps MAX_CONTENT_LENGTH.
 VISA_UPLOAD_REQUEST_LIMIT = 32 * 1024 * 1024
 
+# The visa form's Documents Checklist sends ALL of its files (Passport-size
+# Photograph, National ID and any optional documents) in ONE request, so the
+# 8 MB app-wide limit refused normal submissions - e.g. two 5 MB phone photos,
+# or even a single 8 MB file plus form overhead - before any file was read.
+# These routes get a whole-request cap instead; the 8 MB limit is still
+# enforced PER DOCUMENT by the upload handlers themselves.
+VISA_DOCUMENTS_REQUEST_LIMIT = 48 * 1024 * 1024
+_VISA_DOCUMENTS_PATH = re.compile(r"^/student-visa/application/\d+/(?:step/documents|documents/upload)$")
+
 
 class _AppRequest(app.request_class):
     @property
     def max_content_length(self):
         if self.path == "/application/visa-document/upload":
             return VISA_UPLOAD_REQUEST_LIMIT
+        if _VISA_DOCUMENTS_PATH.match(self.path or ""):
+            return VISA_DOCUMENTS_REQUEST_LIMIT
         return super().max_content_length
 
 
