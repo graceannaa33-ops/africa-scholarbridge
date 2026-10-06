@@ -776,6 +776,13 @@ def _init_db():
     if "availability" not in existing_cols:
         _add_column(cur, "documents", "availability", "TEXT")
     cur.execute("UPDATE documents SET availability = 'Yes' WHERE availability IS NULL AND status IN ('Uploaded', 'Verified')")
+    # Every funding document is optional under the current policy.
+    # Applications created under the older policy (where transcripts,
+    # certificates, recommendation letter, personal statement and CV were
+    # required) are migrated here at startup. Only the is_required flag
+    # changes: uploaded files, statuses and Yes/No/blank answers are kept,
+    # and an unanswered item stays NULL (it is never turned into "No").
+    cur.execute("UPDATE documents SET is_required = 0 WHERE is_required != 0")
 
     # ---------------------------------------------------------------
     # VISA STATUS HISTORY - an audit trail of visa request status changes.

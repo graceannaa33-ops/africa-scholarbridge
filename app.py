@@ -635,16 +635,20 @@ def _ensure_funding_document_checklist(db, application_id):
     )
 
 
+def _funding_yes_without_upload_message(document_type):
+    return f"{document_type} — you selected Yes, so please upload the document."
+
+
 def _missing_funding_documents(documents):
     """Only a document explicitly marked Yes needs an upload.
 
-    All funding documents are optional, so leaving an item unanswered does
-    not block the application from continuing.
+    All funding documents are optional, so leaving an item unanswered (NULL)
+    or answering No never blocks the application from continuing.
     """
     missing = []
     for d in documents:
         if (d["availability"] or "").lower() == "yes" and d["status"] == "Missing":
-            missing.append(f'{d["document_type"]} (you selected Yes)')
+            missing.append(_funding_yes_without_upload_message(d["document_type"]))
     return missing
 
 
@@ -1417,7 +1421,7 @@ APPLICATION_STEPS = [
 ]
 APPLICATION_STEP_TITLES = {
     "personal": "Personal Information", "education": "Education", "funding_need": "Funding Information",
-    "financial": "Financial Information & Amount Requested", "preferences": "Preferences",
+    "financial": "Financial Information", "preferences": "Preferences",
     "statement": "Personal Statement", "documents": "Documents", "bank": "Bank Account / Disbursement Information",
     "review": "Review", "visa": "Visa Verification",
 }
@@ -1440,6 +1444,62 @@ def parse_requested_amount_ksh(raw):
     return amount if 1 <= amount <= REQUESTED_AMOUNT_MAX_KSH else None
 VISA_STEP_NOT_READY_MESSAGE = ("Please complete and review all of your application steps first. "
                                "Visa Verification is the final step.")
+
+
+BANK_DETAILS_INCOMPLETE_MESSAGE = ("Please complete your bank account details for funding disbursement: {}. "
+                                   "Mobile money details are optional and cannot replace your bank account.")
+
+
+def _bank_details_missing(details):
+    """Required disbursement fields missing from a stored student_bank_details
+    row (or all of them when there is no row). Mobile money is deliberately
+    NOT considered here: it is optional extra information and never
+    substitutes for the bank account itself."""
+    if not details:
+        return ["Bank Name", "Account Holder Name", "Account Number", "Branch", "Bank Code"]
+    bank_name = (details["bank_name"] or "").strip()
+    return [label for ok, label in (
+        (bank_name and bank_name != "Not specified", "Bank Name"),
+        ((details["account_holder_name"] or "").strip(), "Account Holder Name"),
+        ((details["account_number"] or "").strip(), "Account Number"),
+        ((details["branch"] or "").strip(), "Branch"),
+        ((details["bank_code"] or "").strip(), "Bank Code"),
+    ) if not ok]
+
+
+def _bank_step_blocker(db, application):
+    """None when the Bank Account / Disbursement step is satisfied for this
+    draft, otherwise the message explaining what is still needed. Used by
+    Review and final submission so a bank row that was edited, un-confirmed
+    or saved by an older version can never slip through."""
+    if application["bank_step_status"] != "COMPLETE":
+        return "Please complete the Bank Account / Disbursement Information step before continuing."
+    details = db.execute("SELECT * FROM student_bank_details WHERE application_id = ? AND confirmed = 1",
+                         (application["id"],)).fetchone()
+    missing = _bank_details_missing(details)
+    if missing:
+        return BANK_DETAILS_INCOMPLETE_MESSAGE.format(", ".join(missing))
+    return None
+
+
+def _redirect_to_fix_bank_step(db, application, message):
+    """Send the student back to the bank step with the problem explained.
+    A COMPLETE status that turned out to be incomplete is re-opened
+    (Action Required + un-confirmed) so the entry form is shown again -
+    the saved row and its stored account number are kept, never deleted."""
+    if application["bank_step_status"] == "COMPLETE":
+        db.execute("UPDATE student_bank_details SET confirmed = 0, updated_at = CURRENT_TIMESTAMP "
+                   "WHERE application_id = ?", (application["id"],))
+        db.execute("UPDATE funding_applications SET bank_step_status = 'ACTION_REQUIRED', "
+                   "last_updated = CURRENT_TIMESTAMP WHERE id = ?", (application["id"],))
+        db.commit()
+    flash(message, "warning")
+    row = db.execute("SELECT * FROM student_bank_details WHERE application_id = ?",
+                     (application["id"],)).fetchone()
+    if row and _bank_details_missing(row):
+        # Straight to the pre-filled entry form so the gaps can be filled.
+        return redirect(url_for("application_step", step_name="bank", edit=1))
+    return redirect(url_for("application_step", step_name="bank"))
 
 
 def _review_done(application):
@@ -1675,6 +1735,9 @@ def application_step(step_name):
                 ) if not ok]
                 if missing:
                     flash("Please fill in: " + ", ".join(missing) + ".", "danger")
+                    # Mobile money alone never satisfies the bank account fields.
+                    if existing_details:
+                        return redirect(url_for("application_step", step_name="bank", edit=1))
                     return redirect(url_for("application_step", step_name="bank"))
 
                 bank_name_final = bank_row["bank_name"] if bank_row else (manual_bank_name or None)
@@ -1726,6 +1789,12 @@ def application_step(step_name):
                 if not request.form.get("confirm_accurate"):
                     flash("Please confirm that your bank information is accurate before continuing.", "warning")
                     return redirect(url_for("application_step", step_name="bank"))
+                # A row saved by an older version may lack fields that are
+                # now required - it cannot be confirmed until completed.
+                still_missing = _bank_details_missing(existing_details)
+                if still_missing:
+                    flash(BANK_DETAILS_INCOMPLETE_MESSAGE.format(", ".join(still_missing)), "warning")
+                    return redirect(url_for("application_step", step_name="bank", edit=1))
                 db.execute(
                     "UPDATE student_bank_details SET confirmed = 1, updated_at = CURRENT_TIMESTAMP WHERE application_id = ?",
                     (application["id"],),
@@ -1751,7 +1820,11 @@ def application_step(step_name):
                         (application["id"],),
                     )
                 db.commit()
-                return redirect(url_for("application_step", step_name="bank"))
+                # Re-open the pre-filled entry form (previously this landed
+                # back on the confirm screen, so details could never be edited).
+                if not existing_details:
+                    return redirect(url_for("application_step", step_name="bank"))
+                return redirect(url_for("application_step", step_name="bank", edit=1))
 
             flash("Please complete the form to continue.", "warning")
             return redirect(url_for("application_step", step_name="bank"))
@@ -1762,9 +1835,14 @@ def application_step(step_name):
             "SELECT * FROM student_bank_details WHERE application_id = ?", (application["id"],)
         ).fetchone()
         masked_account = banks_lib.mask_account_number(existing_details["account_number"]) if existing_details else None
+        # ?edit=1 re-opens the entry form for an un-confirmed saved row. The
+        # form is pre-filled with everything EXCEPT the account number, which
+        # is never sent back to the browser (blank keeps the stored one).
+        editing = bool(existing_details) and not existing_details["confirmed"] and request.args.get("edit") == "1"
         return render_template(
             "application_bank_step.html", application=application, step_index=step_index, steps=APPLICATION_STEPS, step_titles=APPLICATION_STEP_TITLES,
-            existing_details=existing_details, masked_account=masked_account,
+            existing_details=existing_details, masked_account=masked_account, editing=editing,
+            missing_bank_fields=_bank_details_missing(existing_details) if existing_details else [],
             countries=banks_lib.country_names(), account_types=banks_lib.ACCOUNT_TYPES,
         )
 
@@ -1802,36 +1880,31 @@ def application_step(step_name):
                 "SELECT * FROM documents WHERE application_id = ? ORDER BY id",
                 (application["id"],),
             ).fetchall()
+            # Every funding document is optional:
+            #   blank -> NULL (allowed), No -> 'No' (allowed),
+            #   Yes + file -> 'Yes' + Uploaded (allowed), Yes without a file -> blocked.
+            # Every answer and every valid upload in this submission is saved
+            # and committed FIRST, so one problem never discards the
+            # student's other answers; only then is continuation blocked.
+            problems = []
             for row in document_rows:
-                # Every funding document is optional. An unanswered item is
-                # valid and must not block the applicant from continuing.
                 answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
                 if answer not in ("yes", "no"):
-                    # Blank is a deliberate third state for optional funding
-                    # documents. Keep it as NULL rather than silently turning
-                    # an unanswered item into "No".
-                    db.execute(
-                        "UPDATE documents SET availability = NULL WHERE id = ?",
-                        (row["id"],),
-                    )
+                    # Blank is a deliberate third state. Keep it NULL rather
+                    # than silently turning an unanswered item into "No".
+                    db.execute("UPDATE documents SET availability = NULL WHERE id = ?", (row["id"],))
                     continue
                 if answer == "no":
-                    db.execute(
-                        "UPDATE documents SET availability = 'No' WHERE id = ?",
-                        (row["id"],),
-                    )
+                    db.execute("UPDATE documents SET availability = 'No' WHERE id = ?", (row["id"],))
                     continue
 
-                db.execute(
-                    "UPDATE documents SET availability = 'Yes' WHERE id = ?",
-                    (row["id"],),
-                )
+                db.execute("UPDATE documents SET availability = 'Yes' WHERE id = ?", (row["id"],))
                 upload = request.files.get(f"document_{row['id']}_file")
                 if upload and upload.filename:
                     stored, error = _save_funding_document(upload)
                     if error:
-                        flash(f'{row["document_type"]}: {error}', "danger")
-                        return redirect(url_for("application_step", step_name="documents"))
+                        problems.append((f'{row["document_type"]}: {error}', "danger"))
+                        continue
                     if row["file_path"] and row["file_path"].startswith("funding_documents/"):
                         old_path = os.path.join(FUNDING_DOCS_DIR, os.path.basename(row["file_path"]))
                         try:
@@ -1843,9 +1916,12 @@ def application_step(step_name):
                         (f"funding_documents/{stored}", row["id"]),
                     )
                 elif row["status"] == "Missing":
-                    flash(f'Please upload "{row["document_type"]}" before continuing.', "warning")
-                    return redirect(url_for("application_step", step_name="documents"))
+                    problems.append((_funding_yes_without_upload_message(row["document_type"]), "warning"))
             db.commit()
+            if problems:
+                for message, category in problems:
+                    flash(message, category)
+                return redirect(url_for("application_step", step_name="documents"))
         elif step_name == "review":
             # Review leads to the FINAL step (Visa Verification), so make
             # sure the earlier steps that must be filled actually are.
@@ -1855,9 +1931,9 @@ def application_step(step_name):
             if missing:
                 flash("Please complete your " + ", ".join(missing) + " before continuing.", "warning")
                 return redirect(url_for("application_step", step_name="personal"))
-            if application["bank_step_status"] != "COMPLETE":
-                flash("Please complete the Bank Account / Disbursement Information step before continuing.", "warning")
-                return redirect(url_for("application_step", step_name="bank"))
+            bank_problem = _bank_step_blocker(db, application)
+            if bank_problem:
+                return _redirect_to_fix_bank_step(db, application, bank_problem)
             if not application["requested_amount_ksh"]:
                 flash(REQUESTED_AMOUNT_MESSAGE, "warning")
                 return redirect(url_for("application_step", step_name="financial"))
@@ -1880,9 +1956,8 @@ def application_step(step_name):
     application = db.execute("SELECT * FROM funding_applications WHERE id = ?", (application["id"],)).fetchone()
     _ensure_funding_document_checklist(db, application["id"])
     db.commit()
-    _ensure_funding_document_checklist(db, application["id"])
-    db.commit()
-    documents = db.execute("SELECT * FROM documents WHERE application_id = ?", (application["id"],)).fetchall()
+    documents = db.execute("SELECT * FROM documents WHERE application_id = ? ORDER BY id",
+                           (application["id"],)).fetchall()
     review_bank, review_masked_account = None, None
     if step_name == "review":
         # Shown masked only - the full account number never reaches the page.
@@ -2120,6 +2195,11 @@ def application_submit():
     if not _visa_requirement_passed(application):
         flash(VISA_STEP_REQUIRED_MESSAGE, "warning")
         return redirect(url_for("application_step", step_name="visa"))
+    # Bank details may have been edited/un-confirmed after Review - the
+    # application cannot be completed until they are complete again.
+    bank_problem = _bank_step_blocker(db, application)
+    if bank_problem:
+        return _redirect_to_fix_bank_step(db, application, bank_problem)
 
     if request.method == "POST":
         ref, email_sent_ok = _submit_funding_application(db, application["id"], student["id"])
@@ -3219,14 +3299,21 @@ def student_visa_step(request_id, step_name):
     if step_name == "documents" and request.method == "POST":
         _ensure_visa_checklist(db, request_id)
         rows = _checklist_documents(db, request_id)
+        # Rules are unchanged: required documents (Passport-size Photograph,
+        # National ID) must be uploaded; each optional document needs Yes or
+        # No; Yes needs a file. Every valid answer/upload in this submission
+        # is committed BEFORE any problem is reported, so one missing item
+        # never throws away the student's other answers and uploads.
+        problems = []
         for row in rows:
             if row["is_required"]:
                 answer = "yes"
             else:
                 answer = (request.form.get(f"document_{row['id']}_availability") or "").strip().lower()
                 if answer not in ("yes", "no"):
-                    flash(f'Please choose Yes or No for "{row["document_type"]}".', "warning")
-                    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+                    # Blank is never treated as available; the stored answer is left as it was.
+                    problems.append((f'Please choose Yes or No for "{row["document_type"]}".', "warning"))
+                    continue
             if answer == "no":
                 db.execute("UPDATE visa_documents SET availability='No' WHERE id=?", (row["id"],))
                 continue
@@ -3236,12 +3323,12 @@ def student_visa_step(request_id, step_name):
                 original = secure_filename(upload.filename)[:200] or "document"
                 ext = _visa_doc_extension(upload.filename)
                 if ext not in ALLOWED_SUPPORT_DOC_EXTENSIONS:
-                    flash(f'{row["document_type"]}: only PDF, JPG, JPEG and PNG are accepted.', "danger")
-                    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+                    problems.append((f'{row["document_type"]}: only PDF, JPG, JPEG and PNG are accepted.', "danger"))
+                    continue
                 data = upload.stream.read(MAX_SUPPORT_DOC_SIZE_BYTES + 1)
                 if not data or len(data) > MAX_SUPPORT_DOC_SIZE_BYTES or not data.startswith(_SUPPORT_DOC_SIGNATURES[ext]):
-                    flash(f'{row["document_type"]}: invalid or oversized document.', "danger")
-                    return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+                    problems.append((f'{row["document_type"]}: invalid or oversized document.', "danger"))
+                    continue
                 stored = f"{secrets.token_hex(16)}.{ext}"
                 with open(os.path.join(VISA_APP_DOCS_DIR, stored), "wb") as fh:
                     fh.write(data)
@@ -3250,9 +3337,10 @@ def student_visa_step(request_id, step_name):
                 db.execute("UPDATE visa_documents SET stored_file=?, original_name=?, file_size=?, status='Uploaded', uploaded_at=CURRENT_TIMESTAMP, file_path=NULL WHERE id=?",
                            (stored, original, len(data), row["id"]))
             elif not row["stored_file"]:
-                flash(f'Please upload "{row["document_type"]}" because you selected Yes.', "warning")
-                return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
+                problems.append((f'Please upload "{row["document_type"]}" because you selected Yes.', "warning"))
         db.commit()
+        for message, category in problems:
+            flash(message, category)
         return redirect(url_for("student_visa_step", request_id=request_id, step_name="documents"))
 
     if request.method == "POST" and step_name != "declaration":

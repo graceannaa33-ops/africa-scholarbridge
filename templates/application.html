@@ -82,7 +82,7 @@
               </div>
 
             {% elif step_name == 'financial' %}
-              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Financial Information &amp; Amount Requested</h4>
+              <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Financial Information</h4>
               <div class="row g-3">
                 <div class="col-md-6"><label class="form-label fw-semibold" for="requestedAmount">Requested Funding Amount (KSh) <span class="text-danger">*</span></label>
                   <div class="input-group">
@@ -91,18 +91,18 @@
                            value="{{ '{:,}'.format(application.requested_amount_ksh) if application.requested_amount_ksh else '' }}"
                            placeholder="e.g. 75,000" maxlength="15" required>
                   </div>
-                  <div class="form-text">The amount of funding you are requesting. Requested amount only — final funding decisions are subject to review. Next, you'll add your bank account details for disbursement.</div></div>
-                <div class="col-12"><label class="form-label">Household Financial Situation</label>
-                  <textarea name="household_situation" class="form-control" rows="2" placeholder="e.g. My household earns about KSh 25,000 per month, and my education costs are about KSh 100,000 per year.">{{ application.household_situation or '' }}</textarea>
+                  <div class="form-text">The amount of funding you are requesting. <strong>Requested amount only — final funding decisions are subject to review.</strong> Next, you'll add your bank account details for disbursement.</div></div>
+                <div class="col-12"><label class="form-label fw-semibold" for="householdSituation">Household Financial Situation</label>
+                  <textarea id="householdSituation" name="household_situation" class="form-control" rows="2" placeholder="e.g. My household earns about KSh 25,000 per month, and my education costs are about KSh 100,000 per year.">{{ application.household_situation or '' }}</textarea>
                   <div class="form-text">Example: Explain your household income, major expenses, and how education costs affect your family.</div></div>
-                <div class="col-md-6"><label class="form-label">Source of Support</label>
-                  <input type="text" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}" placeholder="e.g. Parent/guardian, part-time work, self-support">
+                <div class="col-md-6"><label class="form-label fw-semibold" for="sourceOfSupport">Source of Support</label>
+                  <input type="text" id="sourceOfSupport" name="source_of_support" class="form-control" value="{{ application.source_of_support or '' }}" placeholder="e.g. Parent/guardian, part-time work, sibling, employer, or personal savings">
                   <div class="form-text">Example: Parent/guardian, sibling, employer, part-time work, or personal savings.</div></div>
-                <div class="col-md-6"><label class="form-label">Estimated Financial Need</label>
-                  <input type="text" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. KSh 75,000 per academic year">
+                <div class="col-md-6"><label class="form-label fw-semibold" for="estimatedFinancialNeed">Estimated Financial Need</label>
+                  <input type="text" id="estimatedFinancialNeed" name="estimated_financial_need" class="form-control" value="{{ application.estimated_financial_need or '' }}" placeholder="e.g. KSh 75,000 per academic year">
                   <div class="form-text">Example: KSh 75,000 for tuition, accommodation, books, and other education expenses.</div></div>
-                <div class="col-12"><label class="form-label">Funding Already Received (if any)</label>
-                  <textarea name="funding_already_received" class="form-control" rows="2" placeholder="e.g. I received KSh 20,000 from a school bursary.">{{ application.funding_already_received or '' }}</textarea>
+                <div class="col-12"><label class="form-label fw-semibold" for="fundingAlreadyReceived">Funding Already Received (if any)</label>
+                  <textarea id="fundingAlreadyReceived" name="funding_already_received" class="form-control" rows="2" placeholder="e.g. I received KSh 20,000 from a school bursary.">{{ application.funding_already_received or '' }}</textarea>
                   <div class="form-text">Example: Name of funding received and amount. If none, write “None”.</div></div>
               </div>
 
@@ -131,55 +131,51 @@
                 <strong>Example:</strong> “My goal is to complete my degree in Information Technology and build a career in software development. My family has limited income, and meeting tuition, accommodation, and learning expenses is difficult. This funding would help me stay in school, complete my studies, and later use my skills to create opportunities for other young people in my community.”
               </div>
               <textarea name="personal_statement" class="form-control" rows="10" placeholder="e.g. My educational goal is to... My financial need is... My career goal is... Funding would help me...">{{ application.personal_statement or '' }}</textarea>
-              <div class="form-text">Tip: Aim to explain your education goal, financial need, career goal, and how your education could benefit your community.</div>
+              <div class="form-text">Tip: Explain your education goal, financial need, career goal, and how your education could benefit your community.</div>
 
             {% elif step_name == 'documents' %}
               <h4 class="fw-bold mb-3">Step {{ step_index + 1 }} — Documents</h4>
               <p class="text-muted">All documents in this section are optional. You may upload any documents you have, or select No if a document is not available. You can continue without uploading any document.</p>
               {% if missing_documents %}
-              <div class="alert alert-warning small" role="alert">Before continuing: {{ missing_documents|join(', ') }}.</div>
+              <div class="alert alert-warning small" role="alert">
+                {% for message in missing_documents %}<div>{{ message }}</div>{% endfor %}
+              </div>
               {% endif %}
               <div class="row g-3" id="fundingDocumentChecklist">
               {% for d in documents %}
+                {# Every funding document is optional - there is no "Required" state here. #}
                 <div class="col-12">
                   <div class="border rounded p-3">
                     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
                       <strong>{{ d.document_type }}</strong>
-                      {% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}
+                      <span class="badge bg-secondary">Optional</span>
                     </div>
-                    {% if d.is_required %}
-                      <div class="mb-2"><span class="badge {{ 'bg-success' if d.status != 'Missing' else 'bg-warning text-dark' }}">
-                        {{ 'Uploaded' if d.status != 'Missing' else 'Missing' }}</span></div>
+                    <div class="form-label fw-semibold">Do you have this document?</div>
+                    <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
+                      <div class="form-check">
+                        <input class="form-check-input availability-choice" type="radio" name="document_{{ d.id }}_availability" value="yes"
+                               id="doc_{{ d.id }}_yes" data-upload-target="upload_{{ d.id }}" {{ 'checked' if d.availability == 'Yes' }}>
+                        <label class="form-check-label" for="doc_{{ d.id }}_yes">Yes, I have it</label>
+                      </div>
+                      <div class="form-check">
+                        <input class="form-check-input availability-choice" type="radio" name="document_{{ d.id }}_availability" value="no"
+                               id="doc_{{ d.id }}_no" data-upload-target="upload_{{ d.id }}" {{ 'checked' if d.availability == 'No' }}>
+                        <label class="form-check-label" for="doc_{{ d.id }}_no">No, I don't have it</label>
+                      </div>
+                    </div>
+                    <div id="upload_{{ d.id }}" class="{{ '' if d.availability == 'Yes' else 'd-none' }}">
                       {% if d.status == 'Missing' %}
-                        <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }}</label>
-                        <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
+                        <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }} <span class="text-danger">*</span></label>
+                        <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control funding-doc-file"
+                               accept=".pdf,.jpg,.jpeg,.png" {{ 'required' if d.availability == 'Yes' }}>
+                        <div class="form-text">You selected Yes, so this upload is required.</div>
+                      {% else %}
+                        <span class="badge bg-success">Uploaded</span>
                       {% endif %}
-                    {% else %}
-                      <div class="form-label fw-semibold">Do you have this document?</div>
-                      <div class="d-flex flex-column flex-sm-row gap-2 mb-2">
-                        <div class="form-check">
-                          <input class="form-check-input availability-choice" type="radio" name="document_{{ d.id }}_availability" value="yes"
-                                 id="doc_{{ d.id }}_yes" data-upload-target="upload_{{ d.id }}" {{ 'checked' if d.availability == 'Yes' }}>
-                          <label class="form-check-label" for="doc_{{ d.id }}_yes">Yes, I have it</label>
-                        </div>
-                        <div class="form-check">
-                          <input class="form-check-input availability-choice" type="radio" name="document_{{ d.id }}_availability" value="no"
-                                 id="doc_{{ d.id }}_no" data-upload-target="upload_{{ d.id }}" {{ 'checked' if d.availability == 'No' }}>
-                          <label class="form-check-label" for="doc_{{ d.id }}_no">No, I don't have it</label>
-                        </div>
-                      </div>
-                      <div id="upload_{{ d.id }}" class="{{ '' if d.availability == 'Yes' else 'd-none' }}">
-                        {% if d.status == 'Missing' %}
-                          <label class="form-label" for="file_{{ d.id }}">Upload {{ d.document_type }}</label>
-                          <input type="file" id="file_{{ d.id }}" name="document_{{ d.id }}_file" class="form-control" accept=".pdf,.jpg,.jpeg,.png">
-                        {% else %}
-                          <span class="badge bg-success">Uploaded</span>
-                        {% endif %}
-                      </div>
-                      {% if d.availability == 'No' %}
-                        <div class="alert alert-light border small mt-2 mb-0"><strong>Not available</strong> — you selected No. You can continue without uploading this document.</div>
-                      {% endif %}
-                    {% endif %}
+                    </div>
+                    <div class="alert alert-light border small mt-2 mb-0 not-available-message {{ '' if d.availability == 'No' else 'd-none' }}">
+                      <strong>Not available</strong> — you selected No. You can continue without uploading this document.
+                    </div>
                   </div>
                 </div>
               {% endfor %}
@@ -190,7 +186,11 @@
                   choice.addEventListener('change', function () {
                     var target = document.getElementById(this.dataset.uploadTarget);
                     if (!target) return;
-                    target.classList.toggle('d-none', this.value !== 'yes');
+                    var isYes = this.value === 'yes';
+                    target.classList.toggle('d-none', !isYes);
+                    // Yes makes this document's upload required; No (or blank) never does.
+                    var fileInput = target.querySelector('.funding-doc-file');
+                    if (fileInput) fileInput.required = isYes;
                     var noMessage = target.parentElement.querySelector('.not-available-message');
                     if (noMessage) noMessage.classList.toggle('d-none', this.value !== 'no');
                   });
@@ -200,6 +200,7 @@
               <p class="text-muted">Please review your information below. The final step after this review is <strong>Visa Verification</strong>.</p>
               <table class="table table-sm">
                 <tr><th>Full Name</th><td>{{ application.full_name }}</td></tr>
+                <tr><th>Email</th><td>{{ application.email }}</td></tr>
                 <tr><th>Country</th><td>{{ application.country }}</td></tr>
                 <tr><th>Institution</th><td>{{ application.institution }}</td></tr>
                 <tr><th>Education Level</th><td>{{ application.education_level }}</td></tr>
@@ -242,7 +243,12 @@
                   </td>
                 </tr>
                 <tr><th>Preferences</th><td>{{ application.preferences }}</td></tr>
-                <tr><th>Personal Statement</th><td>{{ (application.personal_statement or '')[:200] }}...</td></tr>
+                <tr><th>Personal Statement</th>
+                  <td id="reviewPersonalStatement">
+                    {% set statement = (application.personal_statement or '').strip() %}
+                    {% if statement %}{{ statement[:200] }}{% if statement|length > 200 %}…{% endif %}
+                    {% else %}<span class="badge bg-warning text-dark">⚠ Not entered yet</span>{% endif %}
+                  </td></tr>
               </table>
               <div class="form-check mb-3">
                 <input class="form-check-input" type="checkbox" required id="confirm">

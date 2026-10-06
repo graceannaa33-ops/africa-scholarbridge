@@ -13,21 +13,17 @@
           <div class="border rounded p-3">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
               <strong>{{ d.document_type }}</strong>
-              {% if d.is_required %}<span class="badge bg-danger">Required</span>{% else %}<span class="badge bg-secondary">Optional</span>{% endif %}
+              <span class="badge bg-secondary">Optional</span>
             </div>
-            {% if d.is_required %}
-              <div class="mt-2"><span class="badge {{ 'bg-success' if d.status != 'Missing' else 'bg-warning text-dark' }}">{{ 'Uploaded' if d.status != 'Missing' else 'Missing' }}</span></div>
+            <div class="form-label fw-semibold mt-2">Do you have this document?</div>
+            {% if d.availability == 'Yes' %}
+              <span class="badge bg-success">Yes, I have it</span>
+            {% elif d.availability == 'No' %}
+              <span class="badge bg-secondary">No, I don't have it</span>
             {% else %}
-              <div class="form-label fw-semibold mt-2">Do you have this document?</div>
-              {% if d.availability == 'Yes' %}
-                <span class="badge bg-success">Yes, I have it</span>
-              {% elif d.availability == 'No' %}
-                <span class="badge bg-secondary">No, I don't have it</span>
-              {% else %}
-                <span class="badge bg-warning text-dark">Please choose Yes or No</span>
-              {% endif %}
+              <span class="badge bg-light text-dark border">Not answered (optional)</span>
             {% endif %}
-            {% if d.status == 'Missing' and (d.is_required or d.availability == 'Yes') %}
+            {% if d.status == 'Missing' and d.availability == 'Yes' %}
             <form method="POST" class="mt-2">
               <input type="hidden" name="document_id" value="{{ d.id }}">
               <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
@@ -39,7 +35,7 @@
         </div>
         {% endfor %}
       </div>
-      <p class="small text-muted mb-0">Documents are handled through the authenticated application flow. Required documents must be uploaded; optional documents can be declined by selecting No.</p>
+      <p class="small text-muted mb-0">Documents are handled through the authenticated application flow. All documents in this section are optional: upload any you have, select No if one is not available, or leave it unanswered. If you select Yes, please upload that document.</p>
     </div>
   </div>
 </div>

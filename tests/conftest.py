@@ -103,10 +103,10 @@ def complete_steps_before_visa(client):
         "estimated_financial_need": "USD 3,000 / year", "funding_already_received": ""})
     client.post("/application/step/preferences", data={"preferences": ["International Study", "Scholarship"]})
     client.post("/application/step/statement", data={"personal_statement": "I want to study computer science."})
-    # Required funding documents are uploaded; optional documents are explicitly
-    # marked No so the helper reaches Bank/Review without bypassing the new flow.
-    # The test application creates required rows. Submit fictional PDF bytes
-    # through the same upload fields used by the real document step.
+    # Every funding document is optional: the helper answers No for each one
+    # and reaches Bank/Review through the real document step. (The upload
+    # branch below only applies to a legacy required row, which the startup
+    # migration no longer leaves behind.)
     db = get_db()
     app_row = db.execute("SELECT id FROM funding_applications ORDER BY id DESC LIMIT 1").fetchone()
     rows = db.execute("SELECT id, is_required FROM documents WHERE application_id = ?", (app_row["id"],)).fetchall()
