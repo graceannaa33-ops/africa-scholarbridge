@@ -2348,9 +2348,12 @@ def tracker():
                             steps=TRACKER_STEPS, current_step=current_step)
 
 
-@app.route("/documents", methods=["GET", "POST"])
+@app.route("/documents")
 @login_required
 def documents():
+    """Read-only overview of the funding document checklist. Real files are
+    uploaded (and validated) only on the application's Documents step -
+    this page can never mark a document as uploaded."""
     db = g.db
     student = current_student()
     cycle = get_current_cycle()
@@ -2364,24 +2367,8 @@ def documents():
         flash("Start your application first to manage documents.", "info")
         return redirect(url_for("dashboard"))
 
-    if request.method == "POST":
-        doc_id = request.form.get("document_id")
-        row = db.execute(
-            "SELECT * FROM documents WHERE id = ? AND application_id = ?",
-            (doc_id, application["id"]),
-        ).fetchone()
-        if not row:
-            abort(404)
-        db.execute(
-            "UPDATE documents SET status = 'Uploaded', availability = 'Yes', uploaded_at = CURRENT_TIMESTAMP, file_path = ? "
-            "WHERE id = ? AND application_id = ?",
-            (f"uploads/demo-{doc_id}.pdf", doc_id, application["id"]),
-        )
-        db.commit()
-        flash("Document marked as uploaded.", "success")
-        return redirect(url_for("documents"))
-
-    docs = db.execute("SELECT * FROM documents WHERE application_id = ?", (application["id"],)).fetchall()
+    docs = db.execute("SELECT * FROM documents WHERE application_id = ? ORDER BY id",
+                      (application["id"],)).fetchall()
     return render_template("documents.html", application=application, documents=docs,
                            missing_documents=_missing_funding_documents(docs))
 
@@ -3615,29 +3602,19 @@ def student_visa_dashboard():
     )
 
 
-@app.route("/student-visa/documents", methods=["GET", "POST"])
+@app.route("/student-visa/documents")
 @login_required
 def student_visa_documents():
+    """Read-only visa document checklist. Real visa documents are uploaded
+    (and validated) only through the visa application form - see
+    student_visa_document_upload / the "documents" step. This page can
+    never mark a document as uploaded."""
     db = g.db
     student = current_student()
     visa_request = get_active_visa_request(db, student)
     if not visa_request:
         flash("Start a visa assistance request first to manage documents.", "info")
         return redirect(url_for("student_visa_landing"))
-
-    if request.method == "POST":
-        if not visa_lib.is_unlocked(visa_request):
-            flash("Please complete payment before uploading visa documents.", "warning")
-            return redirect(url_for("student_visa_payment", request_id=visa_request["id"]))
-        doc_id = request.form.get("document_id")
-        db.execute(
-            "UPDATE visa_documents SET status = 'Uploaded', uploaded_at = CURRENT_TIMESTAMP, file_path = ? "
-            "WHERE id = ? AND request_id = ?",
-            (f"uploads/demo-visa-{doc_id}.pdf", doc_id, visa_request["id"]),
-        )
-        db.commit()
-        flash("Document marked as uploaded.", "success")
-        return redirect(url_for("student_visa_documents"))
 
     documents = db.execute("SELECT * FROM visa_documents WHERE request_id = ?", (visa_request["id"],)).fetchall()
     return render_template("student_visa/documents.html", visa_request=visa_request, documents=documents)

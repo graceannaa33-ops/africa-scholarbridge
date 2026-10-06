@@ -783,6 +783,14 @@ def _init_db():
     # changes: uploaded files, statuses and Yes/No/blank answers are kept,
     # and an unanswered item stays NULL (it is never turned into "No").
     cur.execute("UPDATE documents SET is_required = 0 WHERE is_required != 0")
+    # The removed demo "Upload" buttons (/documents and /student-visa/documents)
+    # marked rows Uploaded with a made-up path and NO file. Those rows are
+    # reset to Missing so a fake upload never counts as a real one. Only the
+    # demo path pattern matches: real funding uploads live under
+    # funding_documents/ and real visa uploads use stored_file, so no real
+    # file or record is touched. The student's Yes/No answer is kept.
+    cur.execute("""UPDATE documents SET status = 'Missing', file_path = NULL, uploaded_at = NULL
+                   WHERE file_path LIKE 'uploads/demo-%'""")
 
     # ---------------------------------------------------------------
     # VISA STATUS HISTORY - an audit trail of visa request status changes.
@@ -1185,6 +1193,10 @@ def _init_db():
         if col not in existing_cols:
             _add_column(cur, "visa_documents", col, definition)
     cur.execute("UPDATE visa_documents SET availability = 'Yes' WHERE availability IS NULL AND stored_file IS NOT NULL")
+    # Reset visa rows faked by the removed demo button (made-up path, no
+    # stored file). Real uploads always have stored_file and are untouched.
+    cur.execute("""UPDATE visa_documents SET status = 'Missing', file_path = NULL, uploaded_at = NULL
+                   WHERE file_path LIKE 'uploads/demo-visa-%' AND stored_file IS NULL""")
 
     ensure_reference_data(cur)
 

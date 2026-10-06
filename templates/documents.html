@@ -24,10 +24,7 @@
               <span class="badge bg-light text-dark border">Not answered (optional)</span>
             {% endif %}
             {% if d.status == 'Missing' and d.availability == 'Yes' %}
-            <form method="POST" class="mt-2">
-              <input type="hidden" name="document_id" value="{{ d.id }}">
-              <button type="submit" class="btn btn-sm btn-outline-primary">Upload</button>
-            </form>
+              <div class="small text-warning-emphasis mt-2">{{ d.document_type }} — you selected Yes, so please upload the document.</div>
             {% elif d.status != 'Missing' %}
               <div class="text-muted small mt-2">Uploaded {{ d.uploaded_at }}</div>
             {% endif %}
@@ -35,7 +32,12 @@
         </div>
         {% endfor %}
       </div>
-      <p class="small text-muted mb-0">Documents are handled through the authenticated application flow. All documents in this section are optional: upload any you have, select No if one is not available, or leave it unanswered. If you select Yes, please upload that document.</p>
+      {% if application.status == 'Draft' %}
+      <div class="mt-3">
+        <a href="{{ url_for('application_step', step_name='documents') }}" class="btn btn-primary btn-sm">Upload or update documents</a>
+      </div>
+      {% endif %}
+      <p class="small text-muted mb-0 mt-3">Documents are handled through the authenticated application flow. All documents in this section are optional: upload any you have, select No if one is not available, or leave it unanswered. If you select Yes, please upload that document.</p>
     </div>
   </div>
 </div>

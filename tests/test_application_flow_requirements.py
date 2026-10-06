@@ -619,3 +619,83 @@ def test_failed_visa_then_assistance_never_duplicates_records(client, student):
     assert count_applications(student["student_id"]) == 1
     assert len(visa_requests_for(app_row["id"])) == 1
     assert get_application(student["student_id"])["full_name"] == APPLICANT["full_name"]
+
+
+# =====================================================================
+# Demo "Upload" buttons removed - no document can be marked uploaded
+# without a real, validated file.
+# =====================================================================
+def test_documents_page_cannot_mark_a_funding_document_uploaded(client, drafter):
+    before = docs(drafter["application_id"])
+    for row in before.values():
+        r = client.post("/documents", data={"document_id": row["id"]})
+        assert r.status_code == 405
+    assert docs(drafter["application_id"]) == before            # nothing changed, nothing marked Yes
+    assert all(r["status"] == "Missing" and r["file_path"] is None and r["availability"] is None
+               for r in before.values())
+
+
+def test_documents_page_has_no_demo_upload_button_and_links_to_real_upload(client, drafter):
+    cv = docs(drafter["application_id"])["CV"]
+    client.post("/application/step/documents", data={doc_field(cv, "availability"): "yes"})   # Yes, no file
+    page = html(client, "/documents")
+    assert 'method="POST"' not in page and 'name="document_id"' not in page
+    assert ">Upload<" not in page
+    assert "CV — you selected Yes, so please upload the document." in page
+    assert 'href="/application/step/documents"' in page
+    assert docs(drafter["application_id"])["CV"]["status"] == "Missing"
+
+
+def test_visa_documents_page_cannot_mark_a_visa_document_uploaded(client, student):
+    req = visa_request_for(client, student)
+    execute("UPDATE visa_requests SET payment_status = 'paid' WHERE id = ?", (req,))   # old button only showed when paid
+    before = _visa_docs(req)
+    missing = [d for d in before.values() if not d["stored_file"]]
+    assert missing
+    for d in missing:
+        assert client.post("/student-visa/documents", data={"document_id": d["id"]}).status_code == 405
+    assert _visa_docs(req) == before
+    page = html(client, "/student-visa/documents")
+    assert 'name="document_id"' not in page and 'method="POST"' not in page
+    assert f'href="/student-visa/application/{req}"' in page
+
+
+def test_previously_faked_rows_are_reset_but_real_uploads_are_kept(client, drafter):
+    rows = docs(drafter["application_id"])
+    real = rows["Admission Letter"]
+    client.post("/application/step/documents",
+                data={doc_field(real, "availability"): "yes",
+                      doc_field(real, "file"): (io.BytesIO(PDF_BYTES), "admission.pdf")},
+                content_type="multipart/form-data")
+    real_before = docs(drafter["application_id"])["Admission Letter"]
+    fake = rows["CV"]
+    execute("UPDATE documents SET status = 'Uploaded', availability = 'Yes', uploaded_at = CURRENT_TIMESTAMP, "
+            "file_path = ? WHERE id = ?", (f"uploads/demo-{fake['id']}.pdf", fake["id"]))
+
+    database.init_db()   # startup migration
+
+    after = docs(drafter["application_id"])
+    assert after["CV"]["status"] == "Missing" and after["CV"]["file_path"] is None
+    assert after["CV"]["availability"] == "Yes"                      # the student's answer is kept
+    assert after["Admission Letter"] == real_before                  # real upload untouched
+    assert os.path.isfile(os.path.join(app_module.FUNDING_DOCS_DIR, os.path.basename(real_before["file_path"])))
+    # The old fake no longer satisfies "Yes": a real file is now required.
+    r = client.post("/application/step/documents", data={doc_field(fake, "availability"): "yes"})
+    assert r.headers["Location"].endswith("/application/step/documents")
+
+
+def test_previously_faked_visa_rows_are_reset_but_real_uploads_are_kept(client, student):
+    req = visa_request_for(client, student)
+    vdocs = _visa_docs(req)
+    photo = vdocs["Passport-size Photograph"]                        # real upload from the fixture
+    fake = vdocs["Travel Medical Insurance"]
+    execute("UPDATE visa_documents SET status = 'Uploaded', file_path = ? WHERE id = ?",
+            (f"uploads/demo-visa-{fake['id']}.pdf", fake["id"]))
+
+    database.init_db()
+
+    after = _visa_docs(req)
+    assert after["Travel Medical Insurance"]["status"] == "Missing"
+    assert after["Travel Medical Insurance"]["file_path"] is None
+    assert after["Passport-size Photograph"] == photo
+    assert client.get(f"/student-visa/documents/file/{photo['id']}").status_code == 200
