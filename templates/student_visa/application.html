@@ -69,7 +69,7 @@
          style="width: {{ ((step_index + 1) / steps|length * 100)|round }}%;"></div>
   </div>
   {% if form_first %}
-  <p class="small text-muted mb-4">Sections 1–9 → <strong>10. Documents</strong> → Visa Assistance Payment → <strong>11. Additional Information</strong> → <strong>12. Declaration</strong> → Application Completed</p>
+  <p class="small text-muted mb-4">Sections 1–8 → <strong>9. Documents</strong> → Visa Assistance Payment → <strong>10. Additional Information</strong> → <strong>11. Declaration</strong> → Application Completed</p>
   {% else %}<div class="mb-4"></div>{% endif %}
 
   <div class="row justify-content-center">
@@ -78,7 +78,7 @@
         <div class="card-body p-4 p-md-5">
 
           {% if step_name == 'documents' %}
-            <h4 class="fw-bold mb-2">10. Documents Checklist</h4>
+            <h4 class="fw-bold mb-2">9. Documents Checklist</h4>
             <p class="text-muted small" id="requiredDocuments">Required: Passport-size Photograph and National ID. Every other document is optional: choose Yes and upload it, choose No, or leave it unanswered. If you choose Yes, you must upload it. Your files are private and can only be seen by you and authorised Africa ScholarBridge visa staff.</p>
             {% if missing_documents %}
             <div class="alert alert-warning small py-2">Before continuing: {{ missing_documents|join(', ') }}</div>
@@ -173,7 +173,7 @@
             </form>
 
 {% elif step_name == 'declaration' %}
-            <h4 class="fw-bold mb-3">12. Applicant Declaration</h4>
+            <h4 class="fw-bold mb-3">11. Applicant Declaration</h4>
             {% if missing_fields or missing_documents %}
             <div class="alert alert-warning small">
               Before you can sign: {% if missing_fields %}complete
@@ -321,18 +321,8 @@
                 <div class="col-12"><div class="form-label fw-semibold">Source of Funds</div>{{ checks('funding_sources', v.FUND_SOURCES) }}</div>
               </div>
 
-            {% elif step_name == 'accommodation' %}
-              <h4 class="fw-bold mb-3">7. Accommodation Information</h4>
-              <div class="row g-3">
-                <div class="col-md-6">{{ select('accommodation_type', 'Where will you stay?', v.ACCOMMODATION_TYPES, required=True) }}</div>
-                <div class="col-md-6">{{ text('accommodation_name', 'Name of Hotel/Host/Accommodation (optional)', placeholder='Example: University of Embu Hostels / ABC Hotel / John Doe') }}</div>
-                <div class="col-12">{{ area('accommodation_address', 'Address (optional)', rows=2, placeholder='Example: Embu, Kenya') }}</div>
-                <div class="col-md-6">{{ text('accommodation_contact', 'Phone/Email (optional)', placeholder='Example: +254 7XX XXX XXX / host@example.com') }}</div>
-                <div class="col-12"><div class="form-text">Please choose where you will stay. The name, address and phone/email are optional — you can continue without them.</div></div>
-              </div>
-
             {% elif step_name == 'travel_history' %}
-              <h4 class="fw-bold mb-3">8. Travel History</h4>
+              <h4 class="fw-bold mb-3">7. Travel History</h4>
               <div class="mb-2">{{ radios('travelled_before', 'Have you travelled outside your country before?', v.YES_NO, required=True) }}</div>
               <div class="mb-4">{{ area('countries_visited', 'If Yes: Country/Countries Visited', rows=2, placeholder='e.g. Exampleland, Example Country') }}</div>
               <div class="mb-2">{{ radios('previous_application', 'Have you previously applied for a visa to your intended destination?', v.YES_NO, required=True) }}</div>
@@ -343,7 +333,7 @@
               </div>
 
             {% elif step_name == 'legal' %}
-              <h4 class="fw-bold mb-3">9. Immigration / Legal Questions</h4>
+              <h4 class="fw-bold mb-3">8. Immigration / Legal Questions</h4>
               {% for q, field, label in [('overstayed', 'overstayed_explanation', 'Have you ever overstayed a visa or violated immigration rules?'),
                                           ('refused_entry', 'refused_entry_explanation', 'Have you ever been refused entry into another country?'),
                                           ('visa_refused', 'visa_refused_explanation', 'Have you ever had a visa application refused?')] %}
@@ -352,7 +342,7 @@
               {% endfor %}
 
             {% elif step_name == 'additional' %}
-              <h4 class="fw-bold mb-3">11. Additional Information</h4>
+              <h4 class="fw-bold mb-3">10. Additional Information</h4>
               <div class="mb-3">{{ area('additional_information', 'Is there anything else you would like us to know about your application?', rows=6, placeholder='e.g. Sponsoring organization: Example Education Foundation (sponsor: Alex Testperson). Invitation letter: Example organization invitation...') }}</div>
               <div class="form-label fw-semibold">What would you like Africa ScholarBridge to help with? (optional)</div>
               {{ checks('assistance_required', v.ASSISTANCE_OPTIONS) }}

@@ -369,8 +369,6 @@ VISA_FORM_ANSWERS = {
                   "organization_name": "University of Nairobi", "position_course": "BSc Computer Science",
                   "organization_address": "Nairobi", "organization_contact": "info@uon.ac.ke"},
     "financial": {"trip_payer": "Sponsor", "travel_budget": "USD 5,000", "funding_sources": ["Scholarship", "Family Support"]},
-    "accommodation": {"accommodation_type": "University Accommodation", "accommodation_name": "Campus housing",
-                      "accommodation_address": "Campus", "accommodation_contact": "housing@example.edu"},
     "travel_history": {"travelled_before": "No", "previous_application": "No"},
     "legal": {"overstayed": "No", "refused_entry": "No", "visa_refused": "No"},
     "documents": {},
@@ -386,7 +384,7 @@ def upload_visa_support_doc(client, request_id, doc_type, data=None, filename="d
 
 
 def complete_visa_form(client, request_id, sign=True):
-    """Sections 1-9 + the required documents of a form-first visa
+    """Sections 1-8 + the required documents of a form-first visa
     assistance request: the point where payment opens. (Additional
     Information and the Declaration come AFTER payment - see
     finish_visa_form; `sign` is kept for older callers and only signs if
@@ -407,7 +405,7 @@ def complete_visa_form(client, request_id, sign=True):
 
 
 def finish_visa_form(client, request_id):
-    """After a verified payment: 11. Additional Information + 12. Declaration."""
+    """After a verified payment: 10. Additional Information + 11. Declaration."""
     client.post(f"/student-visa/application/{request_id}/step/additional", data=VISA_FORM_ANSWERS["additional"])
     return client.post(f"/student-visa/application/{request_id}/submit",
                        data={"declaration_name": APPLICANT["full_name"], "declaration_confirmed": "yes"})

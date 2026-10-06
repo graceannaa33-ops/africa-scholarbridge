@@ -200,7 +200,7 @@ def test_no_visa_branch_form_documents_payment_declaration_completion(client, st
     docs_page = client.get(f"/student-visa/application/{vr['id']}/step/documents").get_data(as_text=True)
     assert 'id="paymentNotYet"' in docs_page and 'id="documentsComplete"' not in docs_page
 
-    # sections 1-9 + documents -> the payment appears right after the upload
+    # sections 1-8 + documents -> the payment appears right after the upload
     complete_visa_form(client, vr["id"], sign=False)
     vr = request_of(student)
     assert vr["passport_number"] == "AK1234567" and vr["visa_category"] == "Student Visa"

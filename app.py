@@ -3309,7 +3309,7 @@ _CHOICE_FIELDS = {
     "gender": visa_lib.GENDERS, "marital_status": visa_lib.MARITAL_STATUSES,
     "passport_status": visa_lib.PASSPORT_STATUSES, "passport_type": visa_lib.PASSPORT_TYPES,
     "visa_category": visa_lib.VISA_TYPES, "current_status": visa_lib.CURRENT_STATUSES,
-    "trip_payer": visa_lib.TRIP_PAYERS, "accommodation_type": visa_lib.ACCOMMODATION_TYPES,
+    "trip_payer": visa_lib.TRIP_PAYERS,
     "travelled_before": visa_lib.YES_NO, "previous_application": visa_lib.YES_NO,
     "previous_visa_approved": visa_lib.YES_NO, "overstayed": visa_lib.YES_NO,
     "refused_entry": visa_lib.YES_NO, "visa_refused": visa_lib.YES_NO,
@@ -3334,7 +3334,7 @@ _CLEAR_ON_NO = {
 def _clean_form_value(field, raw):
     value = " ".join((raw or "").split()) if field not in (
         "additional_information", "current_address", "purpose_of_travel", "organization_address",
-        "accommodation_address", "previous_refusal_explanation", "overstayed_explanation",
+        "previous_refusal_explanation", "overstayed_explanation",
         "refused_entry_explanation", "visa_refused_explanation", "countries_visited") else (raw or "").strip()
     value = value[:2000]
     if not value:
@@ -3372,7 +3372,7 @@ def _visa_form_editable(visa_request):
     """Can the student fill in / change the visa application form now?"""
     if visa_lib.form_is_first(visa_request):
         if not visa_lib.form_submitted(visa_request):
-            return True              # before payment: sections 1-10; after: 11-12 too
+            return True              # before payment: sections 1-9; after: 10-11 too
         return visa_lib.is_unlocked(visa_request) and visa_request["application_status"] == "information_required"
     return (visa_lib.can_continue_application(visa_request)
             and visa_request["application_status"] in ("application_unlocked", "information_required"))
@@ -3443,8 +3443,8 @@ def student_visa_step(request_id, step_name):
     docs_index = visa_lib.VISA_APPLICATION_STEPS.index("documents")
     paid = visa_lib.is_unlocked(visa_request)
 
-    # Form-first order: ... -> 10. Documents -> PAYMENT -> 11. Additional
-    # Information -> 12. Declaration. Nothing after the documents is
+    # Form-first order: ... -> 9. Documents -> PAYMENT -> 10. Additional
+    # Information -> 11. Declaration. Nothing after the documents is
     # reachable until the payment has been verified.
     if visa_lib.form_is_first(visa_request) and not paid and step_index > docs_index:
         flash("Please complete the Visa Assistance Payment on the Documents page first.", "warning")

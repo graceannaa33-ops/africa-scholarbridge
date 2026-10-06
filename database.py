@@ -1170,6 +1170,9 @@ def _init_db():
         "current_status": "TEXT", "organization_name": "TEXT", "position_course": "TEXT",
         "organization_address": "TEXT", "organization_contact": "TEXT",
         "trip_payer": "TEXT", "travel_budget": "TEXT",
+        # Accommodation columns: the "Accommodation Information" section was
+        # removed from the visa form. Kept so older requests' data is not lost;
+        # nothing writes to them any more.
         "accommodation_type": "TEXT", "accommodation_name": "TEXT", "accommodation_address": "TEXT",
         "accommodation_contact": "TEXT",
         "travelled_before": "TEXT", "countries_visited": "TEXT", "previous_application": "TEXT",
@@ -1184,6 +1187,16 @@ def _init_db():
     }.items():
         if col not in existing_cols:
             _add_column(cur, "visa_requests", col, definition)
+
+    # ONE-TIME: the visa form's "7. Accommodation Information" step was
+    # removed, so every later step moved up one place. visa_requests.
+    # current_step stores a step POSITION (1-based), so requests already past
+    # the old step 7 move back by one to stay on the same section. Guarded by
+    # an app_settings marker so it never runs twice.
+    marker = "migration_visa_accommodation_step_removed"
+    if not cur.execute("SELECT 1 FROM app_settings WHERE key = ?", (marker,)).fetchone():
+        cur.execute("UPDATE visa_requests SET current_step = current_step - 1 WHERE current_step >= 8")
+        cur.execute("INSERT INTO app_settings(key, value) VALUES(?, '1')", (marker,))
 
     # Paystack (online payment of the same visa assistance fee). Extends the
     # existing visa_payments table - one row per payment ATTEMPT. A row only

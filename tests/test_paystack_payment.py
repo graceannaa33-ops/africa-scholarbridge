@@ -97,7 +97,7 @@ def flashes(client):
 
 
 def ready_to_pay(client, student):
-    """Final step 'No visa' -> sections 1-9 + required documents uploaded."""
+    """Final step 'No visa' -> sections 1-8 + required documents uploaded."""
     client.post("/application/step/visa", data={"visa_choice": "no"})
     vr = request_of(student)
     complete_visa_form(client, vr["id"], sign=False)

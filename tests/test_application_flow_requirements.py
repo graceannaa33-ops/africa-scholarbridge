@@ -13,7 +13,7 @@
                         account number never reaches a page.
   Visa                - still the final step; required photo / National ID,
                         optional Yes/No rules and the payment gate unchanged;
-                        Purpose of Travel and accommodation details optional;
+                        Purpose of Travel optional; no Accommodation section;
                         no duplicate requests.
 
 All test data is fictional.
@@ -742,24 +742,6 @@ def test_country_and_visa_type_are_still_required(client, student, field):
     assert r.status_code == 302 and f"/student-visa/application/{req}" in r.headers["Location"]
 
 
-def test_accommodation_details_are_optional_with_examples(client, student):
-    req = visa_request_for(client, student)
-    page = html(client, f"/student-visa/application/{req}/step/accommodation")
-    for name, example in (("accommodation_name", "Example: University of Embu Hostels / ABC Hotel / John Doe"),
-                          ("accommodation_address", "Example: Embu, Kenya"),
-                          ("accommodation_contact", "Example: +254 7XX XXX XXX / host@example.com")):
-        tag = page.split(f'name="{name}"', 1)[1].split(">", 1)[0]
-        assert "required" not in tag and f'placeholder="{example}"' in tag, name
-    r = client.post(f"/student-visa/application/{req}/step/accommodation",
-                    data={"accommodation_type": "Hotel", "accommodation_name": "", "accommodation_address": "",
-                          "accommodation_contact": ""})
-    assert r.headers["Location"].endswith(f"/student-visa/application/{req}/step/travel_history")
-    row = q("SELECT accommodation_name, accommodation_address, accommodation_contact FROM visa_requests WHERE id = ?",
-            (req,))[0]
-    assert not any(row)
-    assert client.get(f"/student-visa/payment/{req}").status_code == 200       # nothing blocks payment
-
-
 def test_optional_visa_yes_without_upload_blocks_payment_but_keeps_other_answers(client, student):
     req = visa_request_for(client, student)
     vdocs = _visa_docs(req)
@@ -807,25 +789,6 @@ def test_required_visa_documents_still_block_even_when_optional_ones_are_blank(c
     execute("UPDATE visa_documents SET stored_file = NULL, status = 'Missing' WHERE request_id = ? "
             "AND document_type = 'National ID'", (req,))
     assert client.get(f"/student-visa/payment/{req}").status_code == 302
-
-
-def test_where_will_you_stay_is_required(client, student):
-    req = visa_request_for(client, student)
-    page = html(client, f"/student-visa/application/{req}/step/accommodation")
-    select = page.split('name="accommodation_type"', 1)[1].split("</select>", 1)[0]
-    assert select.split(">", 1)[0].rstrip().endswith("required")
-    for opt in ("Hotel", "University Accommodation", "With Family/Friend", "Rented Accommodation", "Other"):
-        assert f">{opt}</option>" in select, opt
-    assert "Where will you stay? <span class=\"text-danger\">*</span>" in page
-    assert app_module.visa_lib.VISA_REQUIRED_FIELDS["accommodation"] == ["accommodation_type"]
-    for bad in ("", "Tent on the moon"):                           # blank or tampered value
-        client.post(f"/student-visa/application/{req}/step/accommodation", data={"accommodation_type": bad})
-        assert q("SELECT accommodation_type FROM visa_requests WHERE id = ?", (req,))[0][0] is None
-        r = client.get(f"/student-visa/payment/{req}")
-        assert r.status_code == 302 and f"/student-visa/application/{req}" in r.headers["Location"], bad
-    client.post(f"/student-visa/application/{req}/step/accommodation",
-                data={"accommodation_type": "University Accommodation"})   # name/address/contact left blank
-    assert client.get(f"/student-visa/payment/{req}").status_code == 200
 
 
 def test_visa_assistance_fee_is_still_1500(client, student):
@@ -1219,3 +1182,87 @@ def test_mobile_money_masking_unit():
     assert banks_lib.is_valid_mobile_number("0712 345 645")
     assert not banks_lib.is_valid_mobile_number("0712")
     assert banks_lib.disbursement_method(None) is None
+
+
+
+# =====================================================================
+# VISA FORM - "Accommodation Information" section removed
+# =====================================================================
+def test_accommodation_section_is_gone_from_the_visa_form(client, student):
+    steps = app_module.visa_lib.VISA_APPLICATION_STEPS
+    assert "accommodation" not in steps
+    assert steps == ["personal", "contact", "passport", "visa_info", "education", "financial",
+                     "travel_history", "legal", "documents", "additional", "declaration"]
+    assert "accommodation" not in app_module.visa_lib.VISA_STEP_TITLES
+    assert "accommodation" not in app_module.visa_lib.VISA_REQUIRED_FIELDS
+    assert "accommodation" not in app_module.visa_lib.VISA_STEP_FIELDS
+    assert not hasattr(app_module.visa_lib, "ACCOMMODATION_TYPES")
+    req = visa_request_for(client, student)
+    assert client.get(f"/student-visa/application/{req}/step/accommodation").status_code == 404
+    assert client.post(f"/student-visa/application/{req}/step/accommodation",
+                       data={"accommodation_type": "Hotel"}).status_code == 404
+    for step in steps:
+        page = html(client, f"/student-visa/application/{req}/step/{step}")
+        for text in ("Accommodation Information", "Where will you stay", "Name of Hotel/Host/Accommodation",
+                     "University of Embu Hostels", "accommodation_type", "accommodation_name",
+                     "accommodation_address", "accommodation_contact"):
+            assert text not in page, (step, text)
+
+
+def test_visa_sections_are_numbered_without_a_gap(client, student):
+    req = visa_request_for(client, student)
+    expected = {"financial": "6. Financial Information", "travel_history": "7. Travel History",
+                "legal": "8. Immigration / Legal Questions", "documents": "9. Documents Checklist"}
+    for step, heading in expected.items():
+        assert f">{heading}<" in html(client, f"/student-visa/application/{req}/step/{step}"), step
+    assert "Sections 1–8 → <strong>9. Documents</strong>" in html(client, f"/student-visa/application/{req}/step/personal")
+
+
+def test_financial_section_leads_straight_to_travel_history(client, student):
+    req = visa_request_for(client, student)
+    r = client.post(f"/student-visa/application/{req}/step/financial", data=VISA_FORM_ANSWERS["financial"])
+    assert r.headers["Location"].endswith(f"/student-visa/application/{req}/step/travel_history")
+
+
+def test_payment_needs_no_accommodation_answer(client, student):
+    req = visa_request_for(client, student)
+    execute("UPDATE visa_requests SET accommodation_type = NULL, accommodation_name = NULL, "
+            "accommodation_address = NULL, accommodation_contact = NULL WHERE id = ?", (req,))
+    assert client.get(f"/student-visa/payment/{req}").status_code == 200
+    assert not any(step == "accommodation" for step, _ in
+                   app_module.visa_lib.missing_required_fields(dict(q("SELECT * FROM visa_requests WHERE id = ?", (req,))[0])))
+
+
+def test_old_accommodation_data_is_kept_in_the_database(client, student):
+    req = visa_request_for(client, student)
+    execute("UPDATE visa_requests SET accommodation_type = 'Hotel', accommodation_name = 'Old Hotel' WHERE id = ?", (req,))
+    client.post(f"/student-visa/application/{req}/step/financial", data=VISA_FORM_ANSWERS["financial"])
+    row = q("SELECT accommodation_type, accommodation_name FROM visa_requests WHERE id = ?", (req,))[0]
+    assert tuple(row) == ("Hotel", "Old Hotel")                      # never deleted or overwritten
+    assert "Old Hotel" not in html(client, f"/student-visa/application/{req}/step/financial")
+
+
+def test_in_progress_requests_keep_their_place_after_the_step_was_removed(client, student):
+    req = visa_request_for(client, student)
+    # Simulate requests saved under the OLD 12-step numbering, then run the startup migration again.
+    old_positions = {5: 5, 7: 7, 8: 7, 9: 8, 10: 9, 12: 11}      # old current_step -> new current_step
+    db = get_db()
+    db.execute("DELETE FROM app_settings WHERE key = 'migration_visa_accommodation_step_removed'")
+    student_id = db.execute("SELECT student_id FROM visa_requests WHERE id = ?", (req,)).fetchone()[0]
+    ids = {}
+    for old in old_positions:
+        cur = db.execute("INSERT INTO visa_requests (request_number, student_id, country, currency, currency_symbol, "
+                         "service_price, current_step) SELECT request_number || '-M' || ?, student_id, country, "
+                         "currency, currency_symbol, service_price, ? FROM visa_requests WHERE id = ?", (old, old, req))
+        ids[old] = cur.lastrowid
+    db.commit()
+    db.close()
+    database.init_db()
+    database.init_db()                                              # running again must not shift twice
+    for old, new in old_positions.items():
+        got = q("SELECT current_step FROM visa_requests WHERE id = ?", (ids[old],))[0][0]
+        assert got == new, (old, got, new)
+    steps = app_module.visa_lib.VISA_APPLICATION_STEPS
+    assert steps[old_positions[8] - 1] == "travel_history"          # was on Travel History, still is
+    assert steps[old_positions[10] - 1] == "documents"              # was on Documents, still is
+    execute("DELETE FROM visa_requests WHERE id IN ({})".format(",".join(str(i) for i in ids.values())))

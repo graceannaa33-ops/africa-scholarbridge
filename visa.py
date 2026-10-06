@@ -100,7 +100,7 @@ VISA_PIPELINE_STAGES = [
 # form_is_first below).
 VISA_APPLICATION_STEPS = [
     "personal", "contact", "passport", "visa_info", "education", "financial",
-    "accommodation", "travel_history", "legal", "documents", "additional", "declaration",
+    "travel_history", "legal", "documents", "additional", "declaration",
 ]
 
 VISA_STEP_TITLES = {
@@ -110,7 +110,6 @@ VISA_STEP_TITLES = {
     "visa_info": "Visa Information",
     "education": "Education / Employment Information",
     "financial": "Financial Information",
-    "accommodation": "Accommodation Information",
     "travel_history": "Travel History",
     "legal": "Immigration / Legal Questions",
     "documents": "Documents Checklist",
@@ -135,8 +134,6 @@ VISA_STEP_FIELDS = {
     "education": ["current_status", "education_level", "organization_name", "position_course",
                   "organization_address", "organization_contact"],
     "financial": ["trip_payer", "travel_budget"],
-    "accommodation": ["accommodation_type", "accommodation_name", "accommodation_address",
-                      "accommodation_contact"],
     "travel_history": ["travelled_before", "countries_visited", "previous_application",
                        "previous_application_date", "previous_visa_approved", "previous_refusal_explanation"],
     "legal": ["overstayed", "overstayed_explanation", "refused_entry", "refused_entry_explanation",
@@ -157,7 +154,6 @@ VISA_REQUIRED_FIELDS = {
     "visa_info": ["destination_country", "visa_category"],
     "education": ["current_status"],
     "financial": ["trip_payer"],
-    "accommodation": ["accommodation_type"],   # "Where will you stay?" (name/address/contact optional)
     "travel_history": ["travelled_before", "previous_application"],
     "legal": ["overstayed", "refused_entry", "visa_refused"],
 }
@@ -178,7 +174,6 @@ FUND_SOURCES = ["Employment Income", "Business Income", "Savings", "Scholarship"
 # fills the text box; the applicant can edit it, type their own, or leave it blank.
 PURPOSE_OF_TRAVEL_SUGGESTIONS = ["Educational purposes", "Study", "University/College education",
                                  "Attending an academic program", "Research", "Training", "Other"]
-ACCOMMODATION_TYPES = ["Hotel", "University Accommodation", "With Family/Friend", "Rented Accommodation", "Other"]
 YES_NO = ["Yes", "No"]
 ASSISTANCE_OPTIONS = ["DS-160 Guidance", "Document Preparation", "Application Review", "Appointment Guidance",
                       "Interview Preparation", "General Guidance", "Full Assistance"]
@@ -273,7 +268,7 @@ def missing_selected_documents(visa_request, documents):
 
 
 def documents_complete(visa_request, documents):
-    """Sections 1-9 complete and every required/selected document is ready.
+    """Sections 1-8 complete and every required/selected document is ready.
     Optional documents are required only after an applicant selects Yes;
     selecting No is a valid completion state."""
     return not missing_required_fields(visa_request) and not missing_selected_documents(visa_request, documents)
@@ -565,8 +560,6 @@ VISA_FIELD_LABELS = {
     "organization_name": "School/University/Employer/Business", "position_course": "Position/Course",
     "organization_address": "Address", "organization_contact": "Phone/Email", "trip_payer": "Who will pay",
     "travel_budget": "Estimated Travel Budget", "funding_sources": "Source of Funds",
-    "accommodation_type": "Where will you stay", "accommodation_name": "Hotel/Host/Accommodation",
-    "accommodation_address": "Address", "accommodation_contact": "Phone/Email",
     "travelled_before": "Travelled outside country before", "countries_visited": "Countries Visited",
     "previous_application": "Previously applied to destination", "previous_application_date": "Date of Previous Application",
     "previous_visa_approved": "Was the visa approved", "previous_refusal_explanation": "Refusal explanation",
